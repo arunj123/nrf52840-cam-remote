@@ -29,10 +29,13 @@ static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_UUID16_ALL,
 		      BT_UUID_16_ENCODE(BT_UUID_HIDS_VAL),
 		      BT_UUID_16_ENCODE(BT_UUID_BAS_VAL)),
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
 };
 
 static const struct bt_data sd[] = {
-	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+	BT_DATA_BYTES(BT_DATA_UUID128_ALL,
+		      0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
+		      0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12),
 };
 
 static void connected(struct bt_conn *conn, uint8_t err)
@@ -98,6 +101,7 @@ static void bt_ready(int err)
 
 	if (IS_ENABLED(CONFIG_SETTINGS)) {
 		settings_load();
+		printk("Settings loaded\n");
 	}
 
 	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
@@ -109,43 +113,16 @@ static void bt_ready(int err)
 	printk("Advertising successfully started\n");
 }
 
-static void auth_passkey_display(struct bt_conn *conn, unsigned int passkey)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Passkey for %s: %06u\n", addr, passkey);
-}
-
-static void auth_cancel(struct bt_conn *conn)
-{
-	char addr[BT_ADDR_LE_STR_LEN];
-
-	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
-
-	printk("Pairing cancelled: %s\n", addr);
-}
-
-static struct bt_conn_auth_cb auth_cb_display = {
-	.passkey_display = auth_passkey_display,
-	.passkey_entry = NULL,
-	.cancel = auth_cancel,
-};
-
 int main(void)
 {
 	int err;
+
+	printk("Starting Camera Remote...\n");
 
 	err = bt_enable(bt_ready);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
 		return 0;
-	}
-
-	if (IS_ENABLED(CONFIG_SAMPLE_BT_USE_AUTHENTICATION)) {
-		bt_conn_auth_cb_register(&auth_cb_display);
-		printk("Bluetooth authentication callbacks registered.\n");
 	}
 
 	hog_button_loop();
