@@ -1,0 +1,78 @@
+name: Build Firmware
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        path: nrf_control
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Cache Zephyr Toolchain
+      id: cache-toolchain
+      uses: actions/cache@v4
+      with:
+        path: /opt/toolchains/zephyr-sdk-0.16.8
+        key: zephyr-sdk-0.16.8-ubuntu-x86_64
+    
+    - name: Install Zephyr SDK
+      if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      run: |
+        cd /opt
+        wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.16.8/zephyr-sdk-0.16.8_linux-x86_64.tar.xz
+        tar -xvf zephyr-sdk-0.16.8_linux-x86_64.tar.xz
+        cd zephyr-sdk-0.16.8
+        ./setup.sh -t arm-zephyr-eabi -c
+      
+    - name: Cache West modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          .west
+          bootloader
+          modules
+          tools
+          zephyr
+        key: ${{ runner.os }}-west-modules-${{ hashFiles('nrf_control/west.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-west-modules-
+    
+    - name: Install West and build dependencies
+      run: |
+        pip install west
+        west init -l nrf_control
+        west update
+        west zephyr-export
+        pip install -r zephyr/scripts/requirements.txt
+
+    - name: Build Firmware
+      working-directory: nrf_control
+      run: |
+        west build -b nrf52840_mdk_usb_dongle app
+        
+    - name: Convert to UF2 Format
+      working-directory: nrf_control
+      run: |
+        wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py
+        wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json
+        python3 uf2conv.py build/zephyr/zephyr.hex -c -f 0xADA52840 -o build/zephyr/zephyr.uf2
+        
+    - name: Upload UF2 Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: blinky-firmware
+        path: nrf_control/build/zephyr/zephyr.uf2
