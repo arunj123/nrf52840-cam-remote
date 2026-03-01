@@ -69,6 +69,7 @@ public:
         gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+        last_activity = k_uptime_get();
         k_work_init_delayable(&heartbeat_work, heartbeat_handler);
         k_work_reschedule(&heartbeat_work, K_SECONDS(kHeartbeatIntervalSec));
     }
