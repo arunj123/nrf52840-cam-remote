@@ -11,6 +11,7 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/pwm.h>
 
 #include <array>
 #include <string_view>
@@ -20,21 +21,23 @@ namespace remote {
 class BuzzerController {
 public:
     static void init() {
-        if (device_is_ready(buzzer.port)) {
-            gpio_pin_configure_dt(&buzzer, GPIO_OUTPUT_INACTIVE);
+        if (!device_is_ready(pwm_buzzer.dev)) {
+            printk("PWM buzzer device not ready\n");
         }
     }
 
     static void beep() {
-        if (device_is_ready(buzzer.port)) {
-            gpio_pin_set_dt(&buzzer, 1);
+        if (device_is_ready(pwm_buzzer.dev)) {
+            // Set 50% duty cycle at the configured frequency (usually 2kHz in overlay)
+            uint32_t pulse = pwm_buzzer.period / 2;
+            pwm_set_pulse_dt(&pwm_buzzer, pulse);
             k_sleep(K_MSEC(50));
-            gpio_pin_set_dt(&buzzer, 0);
+            pwm_set_pulse_dt(&pwm_buzzer, 0);
         }
     }
 
 private:
-    static inline const struct gpio_dt_spec buzzer = GPIO_DT_SPEC_GET(DT_ALIAS(buzzer), gpios);
+    static inline const struct pwm_dt_spec pwm_buzzer = PWM_DT_SPEC_GET(DT_ALIAS(buzzer));
 };
 
 class LedController {
