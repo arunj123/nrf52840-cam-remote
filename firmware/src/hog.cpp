@@ -199,15 +199,16 @@ struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
 // ─── Timing constants ────────────────────────────────────────────
-constexpr int64_t kDebounceMs = 50;          // Ignore bounces within 50ms
+constexpr int64_t kDebounceMs = 150;         // Ignore bounces (mechanical switches need 100-150ms)
 constexpr int64_t kDoubleClickWindowMs = 400; // Window for multi-click
 constexpr int64_t kLongPressThresholdMs = 1000;
+constexpr int64_t kCooldownMs = 300;         // Cooldown after gesture before accepting new input
 constexpr int kBurstHoldMs = 2000;
 
 // ─── State machine ──────────────────────────────────────────────
 int click_count = 0;
-int64_t first_press_time = 0;
 int64_t last_press_time = 0;
+int64_t last_gesture_end_time = 0;
 bool gesture_in_progress = false;
 
 struct k_work_delayable gesture_timeout_work;
@@ -222,6 +223,16 @@ void send_hid_report(uint8_t key_bits)
     }
 }
 
+// ─── State reset helper ─────────────────────────────────────────
+void reset_gesture_state()
+{
+    k_work_cancel_delayable(&gesture_timeout_work);
+    k_work_cancel_delayable(&long_press_work);
+    click_count = 0;
+    gesture_in_progress = false;
+    last_gesture_end_time = k_uptime_get();
+}
+
 // ─── Gesture actions ─────────────────────────────────────────────
 
 void action_single_click()
@@ -234,6 +245,7 @@ void action_single_click()
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
+    reset_gesture_state();
 }
 
 void action_double_click()
@@ -247,6 +259,7 @@ void action_double_click()
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
+    reset_gesture_state();
 }
 
 void action_long_press()
@@ -261,6 +274,7 @@ void action_long_press()
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
+    reset_gesture_state();
 }
 
 void action_self_timer()
@@ -276,6 +290,7 @@ void action_self_timer()
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
+    reset_gesture_state();
 }
 
 // ─── Gesture resolution ──────────────────────────────────────────
@@ -284,7 +299,13 @@ void gesture_timeout_handler(struct k_work *work)
 {
     if (!gesture_in_progress) return;
 
-    switch (click_count) {
+    // Cancel any pending long-press timer
+    k_work_cancel_delayable(&long_press_work);
+
+    int count = click_count;
+    printk("GESTURE: Resolving %d click(s)\n", count);
+
+    switch (count) {
     case 1:
         action_single_click();
         break;
@@ -292,25 +313,21 @@ void gesture_timeout_handler(struct k_work *work)
         action_double_click();
         break;
     default:
-        if (click_count >= 3) {
+        if (count >= 3) {
             action_self_timer();
+        } else {
+            reset_gesture_state();
         }
         break;
     }
-
-    click_count = 0;
-    gesture_in_progress = false;
 }
 
 void long_press_handler(struct k_work *work)
 {
+    if (!gesture_in_progress) return;
+
     // Check if button is still held
     if (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4)) {
-        // Cancel the gesture timeout and do long press instead
-        k_work_cancel_delayable(&gesture_timeout_work);
-        click_count = 0;
-        gesture_in_progress = false;
-
         action_long_press();
     }
 }
@@ -320,13 +337,18 @@ void long_press_handler(struct k_work *work)
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
     if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
-        return; // released, not pressed
+        return;
     }
 
     int64_t now = k_uptime_get();
 
-    // Debounce: ignore edges within 50ms of the last registered press
+    // Debounce: ignore bounces within 150ms of last press
     if ((now - last_press_time) < kDebounceMs) {
+        return;
+    }
+
+    // Cooldown: ignore presses too soon after a gesture completed
+    if ((now - last_gesture_end_time) < kCooldownMs) {
         return;
     }
 
@@ -334,9 +356,7 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
     last_press_time = now;
 
     if (click_count == 1) {
-        first_press_time = now;
         gesture_in_progress = true;
-
         // Start long press timer
         k_work_reschedule(&long_press_work, K_MSEC(kLongPressThresholdMs));
     }
