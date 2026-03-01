@@ -15,26 +15,39 @@ To recover or flash the device manually (if the USB bootloader is missing or loc
 - **GND**: Common Ground
 - **3.3V**: Power (The board must be powered to flash)
 
-### External Trigger Button
+### External Trigger Button & Buzzer
 - **Trigger Pin (Primary)**: Pin labeled **P4** (P0.04) shorted to **GND**.
 - **Trigger Pin (Secondary)**: Pin labeled **P5** (P0.05) shorted to **GND**.
-- **Internal Action**: Triggers a Red LED pulse and sends the Bluetooth "Volume Up" command.
+- **Buzzer Feedback**: Connect a **Passive Ceramic Piezo** wafer between **P2** (P0.02) and **GND**.
+- **Action**: Triggers a Red LED pulse, a **50ms (2kHz) acoustic beep**, and sends the Bluetooth "Volume Up" command.
 
-### LED Feedback System
+### LED & Audio Feedback
 - **🔵 Blue**: Advertising (Looking for a pair).
 - **🟢 Green**: Connected (Ready to use).
-- **🔴 Red Pulse**: Trigger detected (Sending shutter command).
-  - *Note: Green LED turns off during the Red pulse for better visibility.*
+- **🔴 Red Pulse + 🔊 Beep**: Trigger detected (Sending shutter command).
+  - *Note: Green LED turns off during the trigger for better visibility.*
 
 ---
 
 ## 2. Software & Development
 
-### Architecture
+### Architecture (Modern C++ Refactor)
+The project was recently refactored to **Modern C++20** for improved modularity and safety.
 - **OS**: Zephyr RTOS v4.x
-- **Stack**: BLE HID (HOGP)
-- **Profile**: Consumer Control (Media Remote)
-- **Pairing**: "Just Works" (no PIN required, encrypted link with bonding)
+- **Standard**: C++20 (using `std::span`, `std::array`, and structured classes)
+- **Logic**: Encapsulated in `remote::HidService`, `remote::BluetoothManager`, and `remote::LedController`.
+- **Profile**: Consumer Control (Media Remote) via HOGP.
+- **Pairing**: "Just Works" (no PIN required, encrypted link with bonding).
+
+### Directory Structure
+```text
+nrf_control/
+├── firmware/     # Zephyr C++/DTS source code & build config
+├── scripts/      # Bootstrap, build, and environment scripts
+├── hardware/     # 3D models (STL/STEP) for the case
+├── docs/         # Wiring diagrams and documentation
+└── README.md     # You are here
+```
 
 ### Quick Start
 
@@ -126,7 +139,7 @@ $OPENOCD_DIR = "C:/Users/<your-user>/.pico-sdk/openocd/0.12.0+dev"
 
 The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) that:
 - Caches the **Zephyr SDK** (~1.5 GB) and **west modules** between runs.
-- Builds the firmware automatically on push/PR to `main`.
+- Builds the firmware automatically on push/PR to the **`master`** branch.
 - Uploads `zephyr.hex` as a downloadable GitHub Actions artifact.
 
 ---
