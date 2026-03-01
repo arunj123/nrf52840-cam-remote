@@ -1,6 +1,15 @@
 / {
 	aliases {
 		sw0 = &button0;
+		buzzer = &buzzer0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		buzzer0: buzzer_0 {
+			gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+			label = "Buzzer";
+		};
 	};
 
 	buttons {

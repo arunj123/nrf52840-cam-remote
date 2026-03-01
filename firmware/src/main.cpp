@@ -17,6 +17,26 @@
 
 namespace remote {
 
+class BuzzerController {
+public:
+    static void init() {
+        if (device_is_ready(buzzer.port)) {
+            gpio_pin_configure_dt(&buzzer, GPIO_OUTPUT_INACTIVE);
+        }
+    }
+
+    static void beep() {
+        if (device_is_ready(buzzer.port)) {
+            gpio_pin_set_dt(&buzzer, 1);
+            k_sleep(K_MSEC(50));
+            gpio_pin_set_dt(&buzzer, 0);
+        }
+    }
+
+private:
+    static inline const struct gpio_dt_spec buzzer = GPIO_DT_SPEC_GET(DT_ALIAS(buzzer), gpios);
+};
+
 class LedController {
 public:
     static void init() {
@@ -37,6 +57,7 @@ public:
         if (active) {
             gpio_pin_set_dt(&led_green, 0);
             gpio_pin_set_dt(&led_red, 1);
+            BuzzerController::beep();
         } else {
             gpio_pin_set_dt(&led_red, 0);
             gpio_pin_set_dt(&led_green, 1);
@@ -185,6 +206,7 @@ int main() {
     printk("Starting Camera Remote (Modern C++)...\n");
 
     remote::LedController::init();
+    remote::BuzzerController::init();
     remote::BluetoothManager::start();
 
     remote::HidService::run_button_loop();
