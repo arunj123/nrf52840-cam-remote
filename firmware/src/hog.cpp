@@ -199,7 +199,8 @@ struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
 // ─── Timing constants ────────────────────────────────────────────
-constexpr int64_t kDoubleClickWindowMs = 350;
+constexpr int64_t kDebounceMs = 50;          // Ignore bounces within 50ms
+constexpr int64_t kDoubleClickWindowMs = 400; // Window for multi-click
 constexpr int64_t kLongPressThresholdMs = 1000;
 constexpr int kBurstHoldMs = 2000;
 
@@ -323,6 +324,11 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
     }
 
     int64_t now = k_uptime_get();
+
+    // Debounce: ignore edges within 50ms of the last registered press
+    if ((now - last_press_time) < kDebounceMs) {
+        return;
+    }
 
     click_count++;
     last_press_time = now;
