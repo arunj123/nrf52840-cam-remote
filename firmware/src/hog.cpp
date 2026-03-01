@@ -299,6 +299,12 @@ void gesture_timeout_handler(struct k_work *work)
 {
     if (!gesture_in_progress) return;
 
+    // If button is still held, don't resolve yet — let long_press_handler take over
+    if (click_count == 1 && (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
+        printk("GESTURE: Button still held, waiting for long-press...\n");
+        return;  // long_press_work is still scheduled
+    }
+
     // Cancel any pending long-press timer
     k_work_cancel_delayable(&long_press_work);
 
