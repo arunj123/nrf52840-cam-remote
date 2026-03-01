@@ -1,4 +1,5 @@
 #include "hog.hpp"
+#include "battery.hpp"
 
 #include <zephyr/types.h>
 #include <zephyr/sys/printk.h>
@@ -28,12 +29,34 @@ public:
 
     static void beep() {
         if (device_is_ready(pwm_buzzer.dev)) {
-            // Set 50% duty cycle at the configured frequency (usually 2kHz in overlay)
             uint32_t pulse = pwm_buzzer.period / 2;
             pwm_set_pulse_dt(&pwm_buzzer, pulse);
             k_sleep(K_MSEC(50));
             pwm_set_pulse_dt(&pwm_buzzer, 0);
         }
+    }
+
+    static void double_beep() {
+        beep();
+        k_sleep(K_MSEC(100));
+        beep();
+    }
+
+    static void long_beep() {
+        if (device_is_ready(pwm_buzzer.dev)) {
+            uint32_t pulse = pwm_buzzer.period / 2;
+            pwm_set_pulse_dt(&pwm_buzzer, pulse);
+            k_sleep(K_MSEC(300));
+            pwm_set_pulse_dt(&pwm_buzzer, 0);
+        }
+    }
+
+    static void countdown_beep() {
+        for (int i = 0; i < 3; ++i) {
+            beep();
+            k_sleep(K_MSEC(950));
+        }
+        long_beep();
     }
 
 private:
@@ -77,6 +100,22 @@ private:
 
 extern "C" void led_set_trigger_active(bool active) {
     remote::LedController::set_trigger_active(active);
+}
+
+extern "C" void buzzer_beep() {
+    remote::BuzzerController::beep();
+}
+
+extern "C" void buzzer_double_beep() {
+    remote::BuzzerController::double_beep();
+}
+
+extern "C" void buzzer_long_beep() {
+    remote::BuzzerController::long_beep();
+}
+
+extern "C" void buzzer_countdown_beep() {
+    remote::BuzzerController::countdown_beep();
 }
 
 namespace remote {
@@ -211,6 +250,8 @@ int main() {
     remote::LedController::init();
     remote::BuzzerController::init();
     remote::BluetoothManager::start();
+    remote::BatteryMonitor::init();
+    remote::BatteryMonitor::start_periodic();
 
     remote::HidService::run_button_loop();
 

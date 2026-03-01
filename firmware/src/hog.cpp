@@ -1,5 +1,11 @@
 /** @file
  *  @brief HoG Service Implementation (Modern C++20)
+ *
+ *  Implements a click timing engine with four gesture modes:
+ *    - Single Click:  Photo (Volume Up)
+ *    - Double Click:  Video Start/Stop (Play/Pause)
+ *    - Long Press:    Burst Mode (hold Volume Up)
+ *    - Triple Click:  Self-Timer (3-second countdown then photo)
  */
 
 #include "hog.hpp"
@@ -23,24 +29,26 @@ namespace remote {
 
 namespace {
 
+// ─── HID Service Internals ───────────────────────────────────────
+
 enum class HidFlags : uint8_t {
     RemoteWake = BIT(0),
     NormallyConnectable = BIT(1),
 };
 
 struct hids_info {
-    uint16_t version; /* version number of base USB HID Specification */
-    uint8_t code;    /* country HID Device hardware is localized for. */
+    uint16_t version;
+    uint8_t code;
     uint8_t flags;
 } __packed;
 
 struct hids_report {
-    uint8_t id;   /* report id */
-    uint8_t type; /* report type */
+    uint8_t id;
+    uint8_t type;
 } __packed;
 
 constexpr hids_info info = {
-    .version = 0x0111, /* HID 1.11 */
+    .version = 0x0111,
     .code = 0x00,
     .flags = static_cast<uint8_t>(HidFlags::NormallyConnectable),
 };
@@ -56,29 +64,31 @@ constexpr hids_report input_report_ref = {
     .type = static_cast<uint8_t>(HidReportType::Input),
 };
 
-uint8_t protocol_mode = 0x01; /* Report Protocol Mode */
+uint8_t protocol_mode = 0x01;
 uint8_t ctrl_point;
 
 constexpr std::array<uint8_t, 43> report_map = {
-    0x05, 0x0c,                    /* Usage Page (Consumer Devices) */
-    0x09, 0x01,                    /* Usage (Consumer Control) */
-    0xa1, 0x01,                    /* Collection (Application) */
-    0x85, 0x01,                    /*   Report ID (1) */
-    0x15, 0x00,                    /*   Logical Minimum (0) */
-    0x25, 0x01,                    /*   Logical Maximum (1) */
-    0x75, 0x01,                    /*   Report Size (1) */
-    0x95, 0x06,                    /*   Report Count (6) */
-    0x09, 0xe9,                    /*   Usage (Volume Increment) */
-    0x09, 0xea,                    /*   Usage (Volume Decrement) */
-    0x09, 0xe2,                    /*   Usage (Mute) */
-    0x09, 0xcd,                    /*   Usage (Play/Pause) */
-    0x09, 0xb5,                    /*   Usage (Scan Next Track) */
-    0x09, 0xb6,                    /*   Usage (Scan Previous Track) */
-    0x81, 0x02,                    /*   Input (Data,Variable,Absolute) */
-    0x95, 0x02,                    /*   Report Count (2) padding */
-    0x81, 0x03,                    /*   Input (Constant,Variable,Absolute) */
-    0xc0                           /* End Collection */
+    0x05, 0x0c,
+    0x09, 0x01,
+    0xa1, 0x01,
+    0x85, 0x01,
+    0x15, 0x00,
+    0x25, 0x01,
+    0x75, 0x01,
+    0x95, 0x06,
+    0x09, 0xe9,    /* Volume Increment */
+    0x09, 0xea,    /* Volume Decrement */
+    0x09, 0xe2,    /* Mute */
+    0x09, 0xcd,    /* Play/Pause */
+    0x09, 0xb5,    /* Scan Next Track */
+    0x09, 0xb6,    /* Scan Previous Track */
+    0x81, 0x02,
+    0x95, 0x02,
+    0x81, 0x03,
+    0xc0
 };
+
+// ─── GATT Callbacks ──────────────────────────────────────────────
 
 ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                   void *buf, uint16_t len, uint16_t offset)
@@ -112,11 +122,9 @@ ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                          const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
     auto *value = static_cast<uint8_t *>(attr->user_data);
-
     if (offset + len > sizeof(ctrl_point)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-
     memcpy(value + offset, buf, len);
     return len;
 }
@@ -142,7 +150,6 @@ ssize_t write_protocol_mode(struct bt_conn *conn, const struct bt_gatt_attr *att
     if (offset + len > sizeof(protocol_mode)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-
     memcpy(&protocol_mode + offset, buf, len);
     return len;
 }
@@ -174,67 +181,191 @@ BT_GATT_SERVICE_DEFINE(hog_svc,
                            nullptr, write_ctrl_point, &ctrl_point),
 );
 
+// ─── Click Timing Engine ─────────────────────────────────────────
+
 namespace {
 
 const struct gpio_dt_spec btn_p5 = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
 const struct gpio_dt_spec btn_p4 = GPIO_DT_SPEC_GET(DT_NODELABEL(button1), gpios);
 
+// External C functions from main.cpp
 extern "C" void led_set_trigger_active(bool active);
+extern "C" void buzzer_beep();
+extern "C" void buzzer_double_beep();
+extern "C" void buzzer_long_beep();
+extern "C" void buzzer_countdown_beep();
 
 struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
-struct k_work button_work;
-bool button_is_pressed;
+// ─── Timing constants ────────────────────────────────────────────
+constexpr int64_t kDoubleClickWindowMs = 350;
+constexpr int64_t kLongPressThresholdMs = 1000;
+constexpr int kBurstHoldMs = 2000;
 
-void button_work_handler(struct k_work *work)
+// ─── State machine ──────────────────────────────────────────────
+int click_count = 0;
+int64_t first_press_time = 0;
+int64_t last_press_time = 0;
+bool gesture_in_progress = false;
+
+struct k_work_delayable gesture_timeout_work;
+struct k_work_delayable long_press_work;
+
+// ─── HID report helpers ─────────────────────────────────────────
+void send_hid_report(uint8_t key_bits)
 {
-    if (!button_is_pressed) return;
+    int err = bt_gatt_notify(nullptr, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
+    if (err) {
+        printk("HID: notify failed (err %d)\n", err);
+    }
+}
 
+// ─── Gesture actions ─────────────────────────────────────────────
+
+void action_single_click()
+{
+    printk("GESTURE: Single Click -> Photo\n");
     led_set_trigger_active(true);
 
-    // Send Volume Up (Bit 0 in the 1-byte report)
-    uint8_t report_data = 0x01;
-    std::span<uint8_t> report{&report_data, 1};
-
-    int err = bt_gatt_notify(nullptr, &hog_svc.attrs[8], report.data(), report.size());
-    if (err) {
-        printk("HID: Vol UP notify failed (err %d)\n", err);
-    } else {
-        printk("HID: Sent Vol UP\n");
-    }
-
+    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
     k_msleep(100);
-
-    report_data = 0x00; // Released
-    err = bt_gatt_notify(nullptr, &hog_svc.attrs[8], report.data(), report.size());
-    if (err) {
-        printk("HID: Release notify failed (err %d)\n", err);
-    } else {
-        printk("HID: Sent Release\n");
-    }
+    send_hid_report(0x00);
 
     led_set_trigger_active(false);
-    k_msleep(200);
-    button_is_pressed = false;
 }
+
+void action_double_click()
+{
+    printk("GESTURE: Double Click -> Video Start/Stop\n");
+    buzzer_double_beep();
+    led_set_trigger_active(true);
+
+    send_hid_report(static_cast<uint8_t>(HidKey::PlayPause));
+    k_msleep(100);
+    send_hid_report(0x00);
+
+    led_set_trigger_active(false);
+}
+
+void action_long_press()
+{
+    printk("GESTURE: Long Press -> Burst Mode\n");
+    buzzer_long_beep();
+    led_set_trigger_active(true);
+
+    // Hold Volume Up for burst
+    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+    k_msleep(kBurstHoldMs);
+    send_hid_report(0x00);
+
+    led_set_trigger_active(false);
+}
+
+void action_self_timer()
+{
+    printk("GESTURE: Triple Click -> Self-Timer\n");
+    led_set_trigger_active(true);
+
+    buzzer_countdown_beep();
+
+    // Take the photo
+    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+    k_msleep(100);
+    send_hid_report(0x00);
+
+    led_set_trigger_active(false);
+}
+
+// ─── Gesture resolution ──────────────────────────────────────────
+
+void gesture_timeout_handler(struct k_work *work)
+{
+    if (!gesture_in_progress) return;
+
+    switch (click_count) {
+    case 1:
+        action_single_click();
+        break;
+    case 2:
+        action_double_click();
+        break;
+    default:
+        if (click_count >= 3) {
+            action_self_timer();
+        }
+        break;
+    }
+
+    click_count = 0;
+    gesture_in_progress = false;
+}
+
+void long_press_handler(struct k_work *work)
+{
+    // Check if button is still held
+    if (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4)) {
+        // Cancel the gesture timeout and do long press instead
+        k_work_cancel_delayable(&gesture_timeout_work);
+        click_count = 0;
+        gesture_in_progress = false;
+
+        action_long_press();
+    }
+}
+
+// ─── GPIO interrupt handler ──────────────────────────────────────
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    if (button_is_pressed) return;
-
-    if (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4)) {
-        button_is_pressed = true;
-        k_work_submit(&button_work);
-        printk("GPIO: Trigger detected\n");
+    if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
+        return; // released, not pressed
     }
+
+    int64_t now = k_uptime_get();
+
+    click_count++;
+    last_press_time = now;
+
+    if (click_count == 1) {
+        first_press_time = now;
+        gesture_in_progress = true;
+
+        // Start long press timer
+        k_work_reschedule(&long_press_work, K_MSEC(kLongPressThresholdMs));
+    }
+
+    // Cancel previous gesture timeout and restart it
+    k_work_reschedule(&gesture_timeout_work, K_MSEC(kDoubleClickWindowMs));
+
+    printk("GPIO: Click #%d at %lld ms\n", click_count, now);
 }
 
 } // namespace
 
+// ─── Public HidService methods ───────────────────────────────────
+
 void HidService::init()
 {
-    k_work_init(&button_work, button_work_handler);
+    k_work_init_delayable(&gesture_timeout_work, gesture_timeout_handler);
+    k_work_init_delayable(&long_press_work, long_press_handler);
+}
+
+void HidService::send_key(HidKey key)
+{
+    send_hid_report(static_cast<uint8_t>(key));
+    k_msleep(100);
+    send_hid_report(0x00);
+}
+
+void HidService::send_key_down(HidKey key)
+{
+    send_hid_report(static_cast<uint8_t>(key));
+}
+
+void HidService::send_key_up()
+{
+    send_hid_report(0x00);
 }
 
 void HidService::run_button_loop()
@@ -251,7 +382,7 @@ void HidService::run_button_loop()
     gpio_add_callback(btn_p5.port, &cb_p5);
     gpio_add_callback(btn_p4.port, &cb_p4);
 
-    printk("Single-trigger HID Ready.\n");
+    printk("Advanced HID Ready: Single=Photo, Double=Video, Long=Burst, Triple=SelfTimer\n");
     k_sleep(K_FOREVER);
 }
 

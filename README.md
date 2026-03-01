@@ -24,8 +24,23 @@ To recover or flash the device manually (if the USB bootloader is missing or loc
 ### LED & Audio Feedback
 - **🔵 Blue**: Advertising (Looking for a pair).
 - **🟢 Green**: Connected (Ready to use).
-- **🔴 Red Pulse + 🔊 Beep**: Trigger detected (Sending shutter command).
-  - *Note: Green LED turns off during the trigger for better visibility.*
+- **🔴 Red + 🔊 Beep**: Trigger detected.
+
+> **Note**: A **passive ceramic piezo buzzer** is used for audio feedback (connected between P2 and GND, driven by 4kHz PWM).
+
+### Click Modes
+| Gesture | Action | Buzzer Feedback |
+|---------|--------|-----------------|
+| **Single Click** | 📸 Photo (Volume Up) | 1 short beep |
+| **Double Click** | 🎥 Video Start/Stop (Play/Pause) | 2 short beeps |
+| **Long Press** (>1s) | 📸📸📸 Burst Mode | 1 long beep |
+| **Triple Click** | ⏱️ Self-Timer (3s countdown) | 3 countdown beeps |
+
+### Battery Monitoring
+The firmware reports battery level to your phone via BLE Battery Service (BAS).
+- **No external wiring needed** — uses the nRF52840’s internal ADC to measure VDD.
+- **To power from battery**: Connect a LiPo (3.7V) to **VIN** (+) and **GND** (-) on the dongle.
+- Battery level updates every 60 seconds and appears in your phone’s Bluetooth settings.
 
 ---
 
