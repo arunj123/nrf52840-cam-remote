@@ -69,8 +69,8 @@ public:
         gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
-        k_timer_init(&heartbeat_timer, heartbeat_handler, nullptr);
-        k_timer_start(&heartbeat_timer, K_SECONDS(kHeartbeatIntervalSec), K_SECONDS(kHeartbeatIntervalSec));
+        k_work_init_delayable(&heartbeat_work, heartbeat_handler);
+        k_work_reschedule(&heartbeat_work, K_SECONDS(kHeartbeatIntervalSec));
     }
 
     static void set_connected(bool connected) {
@@ -97,15 +97,17 @@ public:
         }
     }
 
-    // Call this from button ISR to keep LEDs alive
     static void wake_leds() {
         last_activity = k_uptime_get();
-        leds_dimmed = false;
+        if (leds_dimmed) {
+            leds_dimmed = false;
+            apply_state();
+        }
     }
 
 private:
     static void apply_state() {
-        if (leds_dimmed) return;  // don't turn on if dimmed
+        if (leds_dimmed) return;
         gpio_pin_set_dt(&led_green, is_connected ? 1 : 0);
         gpio_pin_set_dt(&led_blue, is_advertising ? 1 : 0);
     }
@@ -116,38 +118,38 @@ private:
         gpio_pin_set_dt(&led_blue, 0);
     }
 
-    static void heartbeat_handler(struct k_timer *timer) {
+    // Runs in system workqueue (thread context) — safe for printk, k_msleep
+    static void heartbeat_handler(struct k_work *work) {
         int64_t idle_ms = k_uptime_get() - last_activity;
 
         if (idle_ms > (kIdleTimeoutSec * 1000)) {
             if (!leds_dimmed) {
                 all_off();
                 leds_dimmed = true;
-                printk("LED: Dimmed (idle %lld s)\n", idle_ms / 1000);
+                printk("LED: Dimmed after %lld s idle\n", idle_ms / 1000);
             }
 
-            // Quick heartbeat blink to show device is alive
+            // Quick heartbeat blink (safe — we're in thread context)
             if (is_connected) {
                 gpio_pin_set_dt(&led_green, 1);
-                k_busy_wait(50000);  // 50ms (in timer ISR, can't k_sleep)
+                k_msleep(50);
                 gpio_pin_set_dt(&led_green, 0);
             } else if (is_advertising) {
                 gpio_pin_set_dt(&led_blue, 1);
-                k_busy_wait(50000);
+                k_msleep(50);
                 gpio_pin_set_dt(&led_blue, 0);
             }
-        } else if (leds_dimmed) {
-            // Activity resumed, restore LEDs
-            leds_dimmed = false;
-            apply_state();
         }
+
+        // Reschedule ourselves
+        k_work_reschedule(&heartbeat_work, K_SECONDS(kHeartbeatIntervalSec));
     }
 
     static inline const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
     static inline const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
     static inline const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
 
-    static inline struct k_timer heartbeat_timer;
+    static inline struct k_work_delayable heartbeat_work;
     static inline int64_t last_activity = 0;
     static inline bool is_connected = false;
     static inline bool is_advertising = false;
