@@ -346,6 +346,15 @@ void long_press_handler(struct k_work *work)
     // Check if button is still held
     if (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4)) {
         action_long_press();
+    } else {
+        // Button was released before 1s threshold.
+        // gesture_timeout already deferred to us, so resolve now.
+        printk("GESTURE: Released before long-press, resolving %d click(s)\n", click_count);
+        if (click_count == 1) {
+            action_single_click();
+        } else {
+            reset_gesture_state();
+        }
     }
 }
 
