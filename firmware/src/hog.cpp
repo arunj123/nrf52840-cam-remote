@@ -199,7 +199,7 @@ struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
 // ─── Timing constants ────────────────────────────────────────────
-constexpr int64_t kDebounceMs = 150;         // Ignore bounces (mechanical switches need 100-150ms)
+constexpr int64_t kDebounceMs = 80;          // Filter bounce (switches bounce ~5-20ms)
 constexpr int64_t kDoubleClickWindowMs = 400; // Window for multi-click
 constexpr int64_t kLongPressThresholdMs = 1000;
 constexpr int64_t kCooldownMs = 300;         // Cooldown after gesture before accepting new input
