@@ -191,28 +191,21 @@ const struct gpio_dt_spec btn_p4 = GPIO_DT_SPEC_GET(DT_NODELABEL(button1), gpios
 // External C functions from main.cpp
 extern "C" void led_set_trigger_active(bool active);
 extern "C" void buzzer_beep();
-extern "C" void buzzer_double_beep();
 extern "C" void buzzer_long_beep();
-extern "C" void buzzer_countdown_beep();
 
 struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
 // ─── Timing constants ────────────────────────────────────────────
-constexpr int64_t kDebounceMs = 80;          // Filter bounce (switches bounce ~5-20ms)
-constexpr int64_t kDoubleClickWindowMs = 400; // Window for multi-click
-constexpr int64_t kLongPressThresholdMs = 1000;
-constexpr int64_t kCooldownMs = 300;         // Cooldown after gesture before accepting new input
-constexpr int kBurstHoldMs = 2000;
+constexpr int64_t kDebounceMs = 80;
+constexpr int64_t kLongPressMs = 1000;
+constexpr int64_t kBurstHoldMs = 2000;
 
-// ─── State machine ──────────────────────────────────────────────
-int click_count = 0;
+// ─── State ──────────────────────────────────────────────────────
+volatile bool busy = false;     // true while action is running
 int64_t last_press_time = 0;
-int64_t last_gesture_end_time = 0;
-bool gesture_in_progress = false;
-bool gesture_executing = false;  // true while an action is running (blocks ISR)
 
-struct k_work_delayable gesture_timeout_work;
+struct k_work single_click_work;    // immediate, non-delayable
 struct k_work_delayable long_press_work;
 
 // ─── HID report helpers ─────────────────────────────────────────
@@ -224,23 +217,12 @@ void send_hid_report(uint8_t key_bits)
     }
 }
 
-// ─── State reset helper ─────────────────────────────────────────
-void reset_gesture_state()
-{
-    k_work_cancel_delayable(&gesture_timeout_work);
-    k_work_cancel_delayable(&long_press_work);
-    click_count = 0;
-    gesture_in_progress = false;
-    gesture_executing = false;
-    last_gesture_end_time = k_uptime_get();
-}
+// ─── Actions ─────────────────────────────────────────────────────
 
-// ─── Gesture actions ─────────────────────────────────────────────
-
-void action_single_click()
+void do_single_click(struct k_work *work)
 {
-    gesture_executing = true;
-    printk("GESTURE: Single Click -> Photo\n");
+    busy = true;
+    printk("ACTION: Single Click -> Volume Up\n");
     led_set_trigger_active(true);
 
     send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
@@ -248,152 +230,57 @@ void action_single_click()
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
-    reset_gesture_state();
+    busy = false;
 }
 
-void action_double_click()
+void do_long_press(struct k_work *work)
 {
-    gesture_executing = true;
-    printk("GESTURE: Double Click -> Quick double-tap Volume Up\n");
-    buzzer_double_beep();
-    led_set_trigger_active(true);
+    // Only trigger if button is STILL held
+    if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
+        printk("ACTION: Long press cancelled (released)\n");
+        return;
+    }
 
-    // Send two quick Volume Up taps (works better than Play/Pause on camera apps)
-    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-    k_msleep(100);
-    send_hid_report(0x00);
-    k_msleep(150);
-    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-    k_msleep(100);
-    send_hid_report(0x00);
-
-    led_set_trigger_active(false);
-    reset_gesture_state();
-}
-
-void action_long_press()
-{
-    gesture_executing = true;
-    printk("GESTURE: Long Press -> Burst Mode\n");
+    busy = true;
+    printk("ACTION: Long Press -> Burst Mode\n");
     buzzer_long_beep();
     led_set_trigger_active(true);
 
-    // Hold Volume Up for burst
     send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
     k_msleep(kBurstHoldMs);
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
-    reset_gesture_state();
+    busy = false;
 }
 
-void action_self_timer()
-{
-    gesture_executing = true;
-    printk("GESTURE: Triple Click -> Self-Timer\n");
-    led_set_trigger_active(true);
-
-    buzzer_countdown_beep();
-
-    // Take the photo
-    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-    k_msleep(100);
-    send_hid_report(0x00);
-
-    led_set_trigger_active(false);
-    reset_gesture_state();
-}
-
-// ─── Gesture resolution ──────────────────────────────────────────
-
-void gesture_timeout_handler(struct k_work *work)
-{
-    if (!gesture_in_progress) return;
-
-    // If button is still held, don't resolve yet — let long_press_handler take over
-    if (click_count == 1 && (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
-        printk("GESTURE: Button still held, waiting for long-press...\n");
-        return;  // long_press_work is still scheduled
-    }
-
-    // Cancel any pending long-press timer
-    k_work_cancel_delayable(&long_press_work);
-
-    int count = click_count;
-    printk("GESTURE: Resolving %d click(s)\n", count);
-
-    switch (count) {
-    case 1:
-        action_single_click();
-        break;
-    case 2:
-        action_double_click();
-        break;
-    default:
-        if (count >= 3) {
-            action_self_timer();
-        } else {
-            reset_gesture_state();
-        }
-        break;
-    }
-}
-
-void long_press_handler(struct k_work *work)
-{
-    if (!gesture_in_progress) return;
-
-    // Check if button is still held
-    if (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4)) {
-        action_long_press();
-    } else {
-        // Button was released before 1s threshold.
-        // gesture_timeout already deferred to us, so resolve now.
-        printk("GESTURE: Released before long-press, resolving %d click(s)\n", click_count);
-        if (click_count == 1) {
-            action_single_click();
-        } else {
-            reset_gesture_state();
-        }
-    }
-}
-
-// ─── GPIO interrupt handler ──────────────────────────────────────
+// ─── GPIO interrupt ──────────────────────────────────────────────
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    // Block all input while a gesture action is executing
-    if (gesture_executing) return;
-
+    // Only on press (active), not release
     if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
         return;
     }
 
+    // Block during action execution
+    if (busy) return;
+
     int64_t now = k_uptime_get();
 
-    // Debounce: ignore bounces within 150ms of last press
+    // Debounce
     if ((now - last_press_time) < kDebounceMs) {
         return;
     }
-
-    // Cooldown: ignore presses too soon after a gesture completed
-    if ((now - last_gesture_end_time) < kCooldownMs) {
-        return;
-    }
-
-    click_count++;
     last_press_time = now;
 
-    if (click_count == 1) {
-        gesture_in_progress = true;
-        // Start long press timer
-        k_work_reschedule(&long_press_work, K_MSEC(kLongPressThresholdMs));
-    }
+    // Fire single click IMMEDIATELY (no waiting for double-click window)
+    k_work_submit(&single_click_work);
 
-    // Cancel previous gesture timeout and restart it
-    k_work_reschedule(&gesture_timeout_work, K_MSEC(kDoubleClickWindowMs));
+    // Also schedule long-press check at 1 second
+    k_work_reschedule(&long_press_work, K_MSEC(kLongPressMs));
 
-    printk("GPIO: Click #%d at %lld ms\n", click_count, now);
+    printk("GPIO: Press at %lld ms\n", now);
 }
 
 } // namespace
@@ -402,8 +289,8 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
 
 void HidService::init()
 {
-    k_work_init_delayable(&gesture_timeout_work, gesture_timeout_handler);
-    k_work_init_delayable(&long_press_work, long_press_handler);
+    k_work_init(&single_click_work, do_single_click);
+    k_work_init_delayable(&long_press_work, do_long_press);
 }
 
 void HidService::send_key(HidKey key)
@@ -437,7 +324,7 @@ void HidService::run_button_loop()
     gpio_add_callback(btn_p5.port, &cb_p5);
     gpio_add_callback(btn_p4.port, &cb_p4);
 
-    printk("Advanced HID Ready: Single=Photo, Double=Video, Long=Burst, Triple=SelfTimer\n");
+    printk("HID Ready: Press=Photo, Hold 1s=Burst\n");
     k_sleep(K_FOREVER);
 }
 
