@@ -224,6 +224,8 @@ bool is_button_held()
 // ─── GPIO ISR: only enqueues events ─────────────────────────────
 int64_t isr_last_press = 0;
 
+extern "C" void led_wake();
+
 void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
     if (!is_button_held()) return;  // only press, not release
@@ -231,6 +233,8 @@ void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pin
     int64_t now = k_uptime_get();
     if ((now - isr_last_press) < kDebounceMs) return;
     isr_last_press = now;
+
+    led_wake();  // restore LEDs from dimmed state
 
     BtnEvent evt = BtnEvent::Press;
     k_msgq_put(&btn_msgq, &evt, K_NO_WAIT);

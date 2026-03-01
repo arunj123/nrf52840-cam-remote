@@ -69,37 +69,103 @@ public:
         gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+        k_timer_init(&heartbeat_timer, heartbeat_handler, nullptr);
+        k_timer_start(&heartbeat_timer, K_SECONDS(kHeartbeatIntervalSec), K_SECONDS(kHeartbeatIntervalSec));
     }
 
     static void set_connected(bool connected) {
-        gpio_pin_set_dt(&led_green, connected ? 1 : 0);
+        is_connected = connected;
+        wake_leds();
+        apply_state();
     }
 
     static void set_advertising(bool advertising) {
-        gpio_pin_set_dt(&led_blue, advertising ? 1 : 0);
+        is_advertising = advertising;
+        wake_leds();
+        apply_state();
     }
 
     static void set_trigger_active(bool active) {
+        wake_leds();
         if (active) {
             gpio_pin_set_dt(&led_green, 0);
             gpio_pin_set_dt(&led_red, 1);
             BuzzerController::beep();
         } else {
             gpio_pin_set_dt(&led_red, 0);
-            gpio_pin_set_dt(&led_green, 1);
+            apply_state();
         }
     }
 
+    // Call this from button ISR to keep LEDs alive
+    static void wake_leds() {
+        last_activity = k_uptime_get();
+        leds_dimmed = false;
+    }
+
 private:
+    static void apply_state() {
+        if (leds_dimmed) return;  // don't turn on if dimmed
+        gpio_pin_set_dt(&led_green, is_connected ? 1 : 0);
+        gpio_pin_set_dt(&led_blue, is_advertising ? 1 : 0);
+    }
+
+    static void all_off() {
+        gpio_pin_set_dt(&led_green, 0);
+        gpio_pin_set_dt(&led_red, 0);
+        gpio_pin_set_dt(&led_blue, 0);
+    }
+
+    static void heartbeat_handler(struct k_timer *timer) {
+        int64_t idle_ms = k_uptime_get() - last_activity;
+
+        if (idle_ms > (kIdleTimeoutSec * 1000)) {
+            if (!leds_dimmed) {
+                all_off();
+                leds_dimmed = true;
+                printk("LED: Dimmed (idle %lld s)\n", idle_ms / 1000);
+            }
+
+            // Quick heartbeat blink to show device is alive
+            if (is_connected) {
+                gpio_pin_set_dt(&led_green, 1);
+                k_busy_wait(50000);  // 50ms (in timer ISR, can't k_sleep)
+                gpio_pin_set_dt(&led_green, 0);
+            } else if (is_advertising) {
+                gpio_pin_set_dt(&led_blue, 1);
+                k_busy_wait(50000);
+                gpio_pin_set_dt(&led_blue, 0);
+            }
+        } else if (leds_dimmed) {
+            // Activity resumed, restore LEDs
+            leds_dimmed = false;
+            apply_state();
+        }
+    }
+
     static inline const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
     static inline const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
     static inline const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
+
+    static inline struct k_timer heartbeat_timer;
+    static inline int64_t last_activity = 0;
+    static inline bool is_connected = false;
+    static inline bool is_advertising = false;
+    static inline bool leds_dimmed = false;
+
+    static constexpr int kIdleTimeoutSec = 30;
+    static constexpr int kHeartbeatIntervalSec = 5;
 };
 
 } // namespace remote
 
+
 extern "C" void led_set_trigger_active(bool active) {
     remote::LedController::set_trigger_active(active);
+}
+
+extern "C" void led_wake() {
+    remote::LedController::wake_leds();
 }
 
 extern "C" void buzzer_beep() {
