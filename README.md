@@ -30,17 +30,23 @@ To recover or flash the device manually (if the USB bootloader is missing or loc
 
 ### Click Modes
 | Gesture | Action | Buzzer Feedback |
-|---------|--------|-----------------|
-| **Single Click** | 📸 Photo (Volume Up) | 1 short beep |
-| **Double Click** | 🎥 Video Start/Stop (Play/Pause) | 2 short beeps |
-| **Long Press** (>1s) | 📸📸📸 Burst Mode | 1 long beep |
-| **Triple Click** | ⏱️ Self-Timer (3s countdown) | 3 countdown beeps |
+|---------|--------|------------------|
+| **Press** | Photo / Video Start-Stop (Volume Up) | 1 short beep |
+| **Hold >1s** | Burst Mode (hold Volume Up 2s) | 1 long beep |
+
+> **iPhone**: On iPhone 11+, holding Volume Up triggers QuickTake by default. To enable burst: **Settings > Camera > Use Volume Up for Burst**.
 
 ### Battery Monitoring
 The firmware reports battery level to your phone via BLE Battery Service (BAS).
-- **No external wiring needed** — uses the nRF52840’s internal ADC to measure VDD.
+- **No external wiring needed** — uses the nRF52840's internal SAADC to measure VDD.
 - **To power from battery**: Connect a LiPo (3.7V) to **VIN** (+) and **GND** (-) on the dongle.
-- Battery level updates every 60 seconds and appears in your phone’s Bluetooth settings.
+- Battery level updates every 60 seconds and appears in your phone's Bluetooth settings.
+
+### Power Management
+- **Auto-sleep**: CPU enters low-power idle when waiting for button events.
+- **DC/DC mode**: Enabled by default for lower quiescent current.
+- **Device PM**: Peripherals (PWM, ADC) suspended when idle.
+- **Wake**: Any GPIO button press instantly wakes the device.
 
 ---
 
