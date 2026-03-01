@@ -181,14 +181,13 @@ BT_GATT_SERVICE_DEFINE(hog_svc,
                            nullptr, write_ctrl_point, &ctrl_point),
 );
 
-// ─── Click Timing Engine ─────────────────────────────────────────
+// ─── Button Handler (Thread-based state machine) ─────────────────
 
 namespace {
 
 const struct gpio_dt_spec btn_p5 = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
 const struct gpio_dt_spec btn_p4 = GPIO_DT_SPEC_GET(DT_NODELABEL(button1), gpios);
 
-// External C functions from main.cpp
 extern "C" void led_set_trigger_active(bool active);
 extern "C" void buzzer_beep();
 extern "C" void buzzer_long_beep();
@@ -196,19 +195,19 @@ extern "C" void buzzer_long_beep();
 struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
-// ─── Timing constants ────────────────────────────────────────────
+// ─── Message queue: ISR → Thread ─────────────────────────────────
+// ISR puts events here, thread reads them. Zero shared mutable state.
+enum class BtnEvent : uint8_t { Press = 1 };
+
+K_MSGQ_DEFINE(btn_msgq, sizeof(BtnEvent), 4, 1);
+
+// ─── Timing ─────────────────────────────────────────────────────
 constexpr int64_t kDebounceMs = 80;
-constexpr int64_t kLongPressMs = 1000;
-constexpr int64_t kBurstHoldMs = 2000;
+constexpr int64_t kLongPressMs = 800;    // Threshold to detect long press
+constexpr int64_t kBurstHoldMs = 2000;   // How long to hold Volume Up for burst
+constexpr int64_t kPollIntervalMs = 50;  // How often to check if button is held
 
-// ─── State ──────────────────────────────────────────────────────
-volatile bool busy = false;     // true while action is running
-int64_t last_press_time = 0;
-
-struct k_work single_click_work;    // immediate, non-delayable
-struct k_work_delayable long_press_work;
-
-// ─── HID report helpers ─────────────────────────────────────────
+// ─── HID report ─────────────────────────────────────────────────
 void send_hid_report(uint8_t key_bits)
 {
     int err = bt_gatt_notify(nullptr, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
@@ -217,76 +216,88 @@ void send_hid_report(uint8_t key_bits)
     }
 }
 
-// ─── Actions ─────────────────────────────────────────────────────
-
-void do_single_click(struct k_work *work)
+bool is_button_held()
 {
-    busy = true;
-    printk("ACTION: Single Click -> Volume Up\n");
-    led_set_trigger_active(true);
-
-    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-    k_msleep(100);
-    send_hid_report(0x00);
-
-    led_set_trigger_active(false);
-    last_press_time = k_uptime_get();  // catch release bounce
-    busy = false;
+    return gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4);
 }
 
-void do_long_press(struct k_work *work)
+// ─── GPIO ISR: only enqueues events ─────────────────────────────
+int64_t isr_last_press = 0;
+
+void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    // Only trigger if button is STILL held
-    if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
-        printk("ACTION: Long press cancelled (released)\n");
-        return;
-    }
-
-    busy = true;
-
-    // Cancel any pending single-click from release bounce
-    k_work_cancel(&single_click_work);
-
-    printk("ACTION: Long Press -> Burst Mode\n");
-    buzzer_long_beep();
-    led_set_trigger_active(true);
-
-    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-    k_msleep(kBurstHoldMs);
-    send_hid_report(0x00);
-
-    led_set_trigger_active(false);
-    last_press_time = k_uptime_get();  // catch release bounce
-    busy = false;
-}
-
-// ─── GPIO interrupt ──────────────────────────────────────────────
-
-void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-    // Only on press (active), not release
-    if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
-        return;
-    }
-
-    // Block during action execution
-    if (busy) return;
+    if (!is_button_held()) return;  // only press, not release
 
     int64_t now = k_uptime_get();
+    if ((now - isr_last_press) < kDebounceMs) return;
+    isr_last_press = now;
 
-    // Debounce
-    if ((now - last_press_time) < kDebounceMs) {
-        return;
+    BtnEvent evt = BtnEvent::Press;
+    k_msgq_put(&btn_msgq, &evt, K_NO_WAIT);
+}
+
+// ─── Button thread ──────────────────────────────────────────────
+// This thread is the ONLY place that sends HID reports and buzzer
+// feedback. It processes one event at a time, sequentially.
+
+K_THREAD_STACK_DEFINE(btn_stack, 1024);
+struct k_thread btn_thread_data;
+
+void button_thread(void *, void *, void *)
+{
+    printk("Button thread started\n");
+
+    while (true) {
+        BtnEvent evt;
+        // Block until a press event arrives
+        int ret = k_msgq_get(&btn_msgq, &evt, K_FOREVER);
+        if (ret != 0) continue;
+
+        printk("BTN: Press detected\n");
+
+        // ── STEP 1: Fire single click immediately ──
+        led_set_trigger_active(true);
+        send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+        k_msleep(100);
+        send_hid_report(0x00);
+        led_set_trigger_active(false);
+
+        // ── STEP 2: Check if button is being held for burst ──
+        // Poll the button state for kLongPressMs
+        bool still_held = false;
+        int64_t start = k_uptime_get();
+
+        while ((k_uptime_get() - start) < kLongPressMs) {
+            k_msleep(kPollIntervalMs);
+            if (is_button_held()) {
+                still_held = true;
+            } else {
+                still_held = false;
+                break;  // released, no burst
+            }
+        }
+
+        if (still_held && is_button_held()) {
+            // ── STEP 3: Burst mode ──
+            printk("BTN: Burst mode!\n");
+            buzzer_long_beep();
+            led_set_trigger_active(true);
+
+            send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+            k_msleep(kBurstHoldMs);
+            send_hid_report(0x00);
+
+            led_set_trigger_active(false);
+        }
+
+        // ── STEP 4: Drain any bounce events that queued during execution ──
+        k_msgq_purge(&btn_msgq);
+
+        // Small gap before accepting new input
+        k_msleep(100);
+
+        printk("BTN: Ready\n");
     }
-    last_press_time = now;
-
-    // Fire single click IMMEDIATELY (no waiting for double-click window)
-    k_work_submit(&single_click_work);
-
-    // Also schedule long-press check at 1 second
-    k_work_reschedule(&long_press_work, K_MSEC(kLongPressMs));
-
-    printk("GPIO: Press at %lld ms\n", now);
 }
 
 } // namespace
@@ -295,8 +306,11 @@ void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t
 
 void HidService::init()
 {
-    k_work_init(&single_click_work, do_single_click);
-    k_work_init_delayable(&long_press_work, do_long_press);
+    k_thread_create(&btn_thread_data, btn_stack,
+                    K_THREAD_STACK_SIZEOF(btn_stack),
+                    button_thread, nullptr, nullptr, nullptr,
+                    /* priority */ 7, 0, K_NO_WAIT);
+    k_thread_name_set(&btn_thread_data, "btn_thread");
 }
 
 void HidService::send_key(HidKey key)
@@ -324,14 +338,15 @@ void HidService::run_button_loop()
     gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_TO_ACTIVE);
     gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_TO_ACTIVE);
 
-    gpio_init_callback(&cb_p5, button_pressed, BIT(btn_p5.pin));
-    gpio_init_callback(&cb_p4, button_pressed, BIT(btn_p4.pin));
+    gpio_init_callback(&cb_p5, button_isr, BIT(btn_p5.pin));
+    gpio_init_callback(&cb_p4, button_isr, BIT(btn_p4.pin));
 
     gpio_add_callback(btn_p5.port, &cb_p5);
     gpio_add_callback(btn_p4.port, &cb_p4);
 
-    printk("HID Ready: Press=Photo, Hold 1s=Burst\n");
+    printk("HID Ready: Press=Photo, Hold=Burst\n");
     k_sleep(K_FOREVER);
 }
 
 } // namespace remote
+
