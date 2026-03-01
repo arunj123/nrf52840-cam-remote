@@ -7,10 +7,16 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  ZEPHYR_SDK_VERSION: "0.17.0"
+  ZEPHYR_WORKSPACE: ${{ github.workspace }}/zephyrproject
+  ZEPHYR_SDK_DIR: ${{ github.workspace }}/zephyr-sdk-0.17.0
+  BOARD: nrf52840_mdk
+
 jobs:
   build:
-    runs-on: ubuntu-latest
-    
+    runs-on: ubuntu-22.04
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -20,59 +26,79 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.11'
+        python-version: '3.12'
 
-    - name: Cache Zephyr Toolchain
-      id: cache-toolchain
+    # ---------- Zephyr SDK ----------
+    - name: Cache Zephyr SDK
+      id: cache-sdk
       uses: actions/cache@v4
       with:
-        path: /opt/toolchains/zephyr-sdk-0.16.8
-        key: zephyr-sdk-0.16.8-ubuntu-x86_64
-    
+        path: ${{ env.ZEPHYR_SDK_DIR }}
+        key: zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}-linux-x86_64
+
     - name: Install Zephyr SDK
-      if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      if: steps.cache-sdk.outputs.cache-hit != 'true'
       run: |
-        cd /opt
-        wget https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v0.16.8/zephyr-sdk-0.16.8_linux-x86_64.tar.xz
-        tar -xvf zephyr-sdk-0.16.8_linux-x86_64.tar.xz
-        cd zephyr-sdk-0.16.8
+        wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${ZEPHYR_SDK_VERSION}/zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64.tar.xz
+        tar -xf zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64.tar.xz
+        rm zephyr-sdk-${ZEPHYR_SDK_VERSION}_linux-x86_64.tar.xz
+        cd ${ZEPHYR_SDK_DIR}
         ./setup.sh -t arm-zephyr-eabi -c
-      
+
+    # ---------- West + Zephyr workspace ----------
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq git cmake ninja-build gperf ccache \
+          dfu-util device-tree-compiler wget xz-utils file make \
+          gcc gcc-multilib g++-multilib libsdl2-dev libmagic1
+
+    - name: Install west
+      run: |
+        pip install west
+
     - name: Cache West modules
+      id: cache-west
       uses: actions/cache@v4
       with:
         path: |
-          .west
-          bootloader
-          modules
-          tools
-          zephyr
-        key: ${{ runner.os }}-west-modules-${{ hashFiles('nrf_control/west.yml') }}
+          ${{ env.ZEPHYR_WORKSPACE }}/.west
+          ${{ env.ZEPHYR_WORKSPACE }}/bootloader
+          ${{ env.ZEPHYR_WORKSPACE }}/modules
+          ${{ env.ZEPHYR_WORKSPACE }}/tools
+          ${{ env.ZEPHYR_WORKSPACE }}/zephyr
+        key: west-modules-${{ runner.os }}-${{ hashFiles('nrf_control/.github/workflows/build.yml') }}
         restore-keys: |
-          ${{ runner.os }}-west-modules-
-    
-    - name: Install West and build dependencies
-      run: |
-        pip install west
-        west init -l nrf_control
-        west update
-        west zephyr-export
-        pip install -r zephyr/scripts/requirements.txt
+          west-modules-${{ runner.os }}-
 
+    - name: Initialize Zephyr workspace
+      run: |
+        if [ ! -d "${ZEPHYR_WORKSPACE}/.west" ]; then
+          mkdir -p ${ZEPHYR_WORKSPACE}
+          cd ${ZEPHYR_WORKSPACE}
+          west init
+          west update
+        else
+          cd ${ZEPHYR_WORKSPACE}
+          west update
+        fi
+        west zephyr-export
+
+    - name: Install Zephyr Python requirements
+      run: |
+        pip install -r ${ZEPHYR_WORKSPACE}/zephyr/scripts/requirements.txt
+
+    # ---------- Build ----------
     - name: Build Firmware
-      working-directory: nrf_control
       run: |
-        west build -b nrf52840_mdk_usb_dongle app
-        
-    - name: Convert to UF2 Format
-      working-directory: nrf_control
-      run: |
-        wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2conv.py
-        wget https://raw.githubusercontent.com/microsoft/uf2/master/utils/uf2families.json
-        python3 uf2conv.py build/zephyr/zephyr.hex -c -f 0xADA52840 -o build/zephyr/zephyr.uf2
-        
-    - name: Upload UF2 Artifact
+        cd ${ZEPHYR_WORKSPACE}
+        west build -b ${BOARD} \
+          -d ${{ github.workspace }}/nrf_control/app/build \
+          ${{ github.workspace }}/nrf_control/app
+
+    # ---------- Artifacts ----------
+    - name: Upload firmware hex
       uses: actions/upload-artifact@v4
       with:
-        name: blinky-firmware
-        path: nrf_control/build/zephyr/zephyr.uf2
+        name: camera-remote-firmware
+        path: nrf_control/app/build/zephyr/zephyr.hex

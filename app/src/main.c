@@ -21,8 +21,41 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
+#include <zephyr/drivers/gpio.h>
+
+/* Exported LED control for HOG */
+void led_set_trigger_active(bool active)
+{
+	static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+	static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
+
+	if (active) {
+		gpio_pin_set_dt(&led_green, 0); // Turn off green
+		gpio_pin_set_dt(&led_red, 1);   // Turn on red
+	} else {
+		/* Only restore green if we are actually connected */
+		/* For simplicity, we'll just toggle them here */
+		gpio_pin_set_dt(&led_red, 0);
+		gpio_pin_set_dt(&led_green, 1);
+	}
+}
 
 #include "hog.h"
+
+#define LED0_NODE DT_ALIAS(led0) // Green
+#define LED1_NODE DT_ALIAS(led1) // Red
+#define LED2_NODE DT_ALIAS(led2) // Blue
+
+static const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(LED0_NODE, gpios);
+static const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(LED1_NODE, gpios);
+static const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
+
+static void leds_init(void)
+{
+	gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
+	gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
+	gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+}
 
 static const struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -51,6 +84,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
 	}
 
 	printk("Connected %s\n", addr);
+	gpio_pin_set_dt(&led_green, 1);
+	gpio_pin_set_dt(&led_blue, 0);
 
 	if (bt_conn_set_security(conn, BT_SECURITY_L2)) {
 		printk("Failed to set security\n");
@@ -60,11 +95,22 @@ static void connected(struct bt_conn *conn, uint8_t err)
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
 	char addr[BT_ADDR_LE_STR_LEN];
+	int err;
 
 	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
 	printk("Disconnected from %s, reason 0x%02x %s\n", addr,
 	       reason, bt_hci_err_to_str(reason));
+	gpio_pin_set_dt(&led_green, 0);
+
+	/* Restart advertising so the device is discoverable again */
+	err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+	if (err) {
+		printk("Re-advertising failed (err %d)\n", err);
+	} else {
+		printk("Re-advertising started\n");
+	}
+	gpio_pin_set_dt(&led_blue, 1);
 }
 
 static void security_changed(struct bt_conn *conn, bt_security_t level,
@@ -111,19 +157,37 @@ static void bt_ready(int err)
 	}
 
 	printk("Advertising successfully started\n");
+	gpio_pin_set_dt(&led_blue, 1);
 }
+
+static void auth_cancel(struct bt_conn *conn)
+{
+	char addr[BT_ADDR_LE_STR_LEN];
+
+	bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+
+	printk("Pairing cancelled: %s\n", addr);
+}
+
+static struct bt_conn_auth_cb auth_cb_display = {
+	.cancel = auth_cancel,
+};
 
 int main(void)
 {
 	int err;
 
 	printk("Starting Camera Remote...\n");
+	leds_init();
 
 	err = bt_enable(bt_ready);
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
 		return 0;
 	}
+
+	bt_conn_auth_cb_register(&auth_cb_display);
+	printk("Authentication callbacks registered\n");
 
 	hog_button_loop();
 	return 0;

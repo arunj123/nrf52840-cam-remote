@@ -6,9 +6,19 @@
 	buttons {
 		compatible = "gpio-keys";
 		button0: button_0 {
-			gpios = <&gpio0 11 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			label = "Push button switch 0";
+			gpios = <&gpio0 5 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "P5 Pin";
 			zephyr,code = <INPUT_KEY_0>;
+		};
+		button1: button_1 {
+			gpios = <&gpio0 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "P4 Pin";
+			zephyr,code = <INPUT_KEY_1>;
+		};
+		button2: button_2 {
+			gpios = <&gpio1 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "Board User Button";
+			zephyr,code = <INPUT_KEY_2>;
 		};
 	};
 };

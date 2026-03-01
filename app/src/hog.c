@@ -40,7 +40,7 @@ struct hids_report {
 } __packed;
 
 static struct hids_info info = {
-	.version = 0x0000,
+	.version = 0x0111, /* HID 1.11 */
 	.code = 0x00,
 	.flags = HIDS_NORMALLY_CONNECTABLE,
 };
@@ -56,22 +56,29 @@ static struct hids_report input = {
 	.type = HIDS_INPUT,
 };
 
+static uint8_t protocol_mode = 0x01; /* Report Protocol Mode */
+
 static uint8_t simulate_input;
 static uint8_t ctrl_point;
 static uint8_t report_map[] = {
-	0x05, 0x0C, /* Usage Page (Consumer) */
-	0x09, 0x01, /* Usage (Consumer Control) */
-	0xA1, 0x01, /* Collection (Application) */
-	0x85, 0x01, /*   Report ID (1) */
-	0x15, 0x00, /*   Logical Minimum (0) */
-	0x25, 0x01, /*   Logical Maximum (1) */
-	0x75, 0x01, /*   Report Size (1) */
-	0x95, 0x01, /*   Report Count (1) */
-	0x09, 0xE9, /*   Usage (Volume Increment) */
-	0x81, 0x02, /*   Input (Data,Var,Abs,No Wrap,Linear,...) */
-	0x95, 0x07, /*   Report Count (7) for padding */
-	0x81, 0x03, /*   Input (Const,Var,Abs,No Wrap,Linear,...) */
-	0xC0,       /* End Collection */
+	0x05, 0x0c,                    /* Usage Page (Consumer Devices) */
+	0x09, 0x01,                    /* Usage (Consumer Control) */
+	0xa1, 0x01,                    /* Collection (Application) */
+	0x85, 0x01,                    /*   Report ID (1) */
+	0x15, 0x00,                    /*   Logical Minimum (0) */
+	0x25, 0x01,                    /*   Logical Maximum (1) */
+	0x75, 0x01,                    /*   Report Size (1) */
+	0x95, 0x06,                    /*   Report Count (6) */
+	0x09, 0xe9,                    /*   Usage (Volume Increment) */
+	0x09, 0xea,                    /*   Usage (Volume Decrement) */
+	0x09, 0xe2,                    /*   Usage (Mute) */
+	0x09, 0xcd,                    /*   Usage (Play/Pause) */
+	0x09, 0xb5,                    /*   Usage (Scan Next Track) */
+	0x09, 0xb6,                    /*   Usage (Scan Previous Track) */
+	0x81, 0x02,                    /*   Input (Data,Variable,Absolute) */
+	0x95, 0x02,                    /*   Report Count (2) padding */
+	0x81, 0x03,                    /*   Input (Constant,Variable,Absolute) */
+	0xc0                           /* End Collection */
 };
 
 
@@ -108,7 +115,8 @@ static ssize_t read_input_report(struct bt_conn *conn,
 				 const struct bt_gatt_attr *attr, void *buf,
 				 uint16_t len, uint16_t offset)
 {
-	return bt_gatt_attr_read(conn, attr, buf, len, offset, NULL, 0);
+	static uint8_t zero_report = 0;
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, &zero_report, 1);
 }
 
 static ssize_t write_ctrl_point(struct bt_conn *conn,
@@ -137,22 +145,49 @@ static ssize_t write_ctrl_point(struct bt_conn *conn,
 #define SAMPLE_BT_PERM_WRITE BT_GATT_PERM_WRITE_ENCRYPT
 #endif
 
+static ssize_t read_protocol_mode(struct bt_conn *conn,
+				  const struct bt_gatt_attr *attr, void *buf,
+				  uint16_t len, uint16_t offset)
+{
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, &protocol_mode,
+				 sizeof(protocol_mode));
+}
+
+static ssize_t write_protocol_mode(struct bt_conn *conn,
+				   const struct bt_gatt_attr *attr,
+				   const void *buf, uint16_t len, uint16_t offset,
+				   uint8_t flags)
+{
+	if (offset + len > sizeof(protocol_mode)) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+
+	memcpy(&protocol_mode + offset, buf, len);
+
+	return len;
+}
+
 /* HID Service Declaration */
 BT_GATT_SERVICE_DEFINE(hog_svc,
-	BT_GATT_PRIMARY_SERVICE(BT_UUID_HIDS),
-	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_INFO, BT_GATT_CHRC_READ,
+	BT_GATT_PRIMARY_SERVICE(BT_UUID_HIDS),                                  // 0
+	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_PROTOCOL_MODE,                      // 1, 2
+			       BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+			       BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+			       read_protocol_mode, write_protocol_mode,
+			       &protocol_mode),
+	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_INFO, BT_GATT_CHRC_READ,            // 3, 4
 			       BT_GATT_PERM_READ, read_info, NULL, &info),
-	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT_MAP, BT_GATT_CHRC_READ,
+	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT_MAP, BT_GATT_CHRC_READ,      // 5, 6
 			       BT_GATT_PERM_READ, read_report_map, NULL, NULL),
-	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT,
+	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT,                             // 7, 8
 			       BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
 			       SAMPLE_BT_PERM_READ,
 			       read_input_report, NULL, NULL),
-	BT_GATT_CCC(input_ccc_changed,
+	BT_GATT_CCC(input_ccc_changed,                                          // 9
 		    SAMPLE_BT_PERM_READ | SAMPLE_BT_PERM_WRITE),
-	BT_GATT_DESCRIPTOR(BT_UUID_HIDS_REPORT_REF, BT_GATT_PERM_READ,
+	BT_GATT_DESCRIPTOR(BT_UUID_HIDS_REPORT_REF, BT_GATT_PERM_READ,          // 10
 			   read_report, NULL, &input),
-	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_CTRL_POINT,
+	BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_CTRL_POINT,                         // 11, 12
 			       BT_GATT_CHRC_WRITE_WITHOUT_RESP,
 			       BT_GATT_PERM_WRITE,
 			       NULL, write_ctrl_point, &ctrl_point),
@@ -162,36 +197,86 @@ void hog_init(void)
 {
 }
 
-#define SW0_NODE DT_ALIAS(sw0)
-static const struct gpio_dt_spec sw0 = GPIO_DT_SPEC_GET(SW0_NODE, gpios);
-static struct gpio_callback button_cb_data;
+static const struct gpio_dt_spec btn_p5 = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
+static const struct gpio_dt_spec btn_p4 = GPIO_DT_SPEC_GET(DT_NODELABEL(button1), gpios);
+
+extern void led_set_trigger_active(bool active);
+
+static struct gpio_callback cb_p5;
+static struct gpio_callback cb_p4;
+
+static struct k_work button_work;
+static bool button_is_pressed;
+
+static void button_work_handler(struct k_work *work)
+{
+	uint8_t report = 0x01; /* Volume UP (Bit 0) */
+	int err;
+
+	if (button_is_pressed) {
+		led_set_trigger_active(true);
+		
+		/* Send Volume Up (Bit 0 in the 1-byte report) */
+		err = bt_gatt_notify(NULL, &hog_svc.attrs[8], &report, sizeof(report));
+		if (err) {
+			printk("HID: Vol UP notify failed (err %d)\n", err);
+		} else {
+			printk("HID: Sent Vol UP\n");
+		}
+		
+		/* Hold for 100ms then send release */
+		k_msleep(100);
+		
+		report = 0x00; /* Released */
+		err = bt_gatt_notify(NULL, &hog_svc.attrs[8], &report, sizeof(report));
+		if (err) {
+			printk("HID: Release notify failed (err %d)\n", err);
+		} else {
+			printk("HID: Sent Release\n");
+		}
+		led_set_trigger_active(false);
+		
+		/* Debounce guard */
+		k_msleep(200);
+		button_is_pressed = false;
+	}
+}
 
 static void button_pressed(const struct device *dev, struct gpio_callback *cb,
 		    uint32_t pins)
 {
-	if (!simulate_input) {
-		return;
+	if (button_is_pressed) {
+		return; /* Already processing a trigger */
 	}
 
-	uint8_t report = 0;
-	if (gpio_pin_get_dt(&sw0)) {
-		report |= BIT(0); /* Volume Increment pressed */
-		printk("Button pressed, sending Vol UP (Camera Shutter)\n");
-	} else {
-		printk("Button released, sending empty report\n");
+	/* Check if P4 or P5 went LOW (active) */
+	if (gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4)) {
+		/* Note: gpio_pin_get_dt returns 1 for ACTIVE.
+		 * Since we use GPIO_ACTIVE_LOW, it returns 1 when pin is GND.
+		 */
+		button_is_pressed = true;
+		k_work_submit(&button_work);
+		printk("GPIO: Trigger detected\n");
 	}
-
-	bt_gatt_notify(NULL, &hog_svc.attrs[5], &report, sizeof(report));
 }
 
 void hog_button_loop(void)
 {
-	gpio_pin_configure_dt(&sw0, GPIO_INPUT);
-	gpio_pin_interrupt_configure_dt(&sw0, GPIO_INT_EDGE_BOTH);
+	k_work_init(&button_work, button_work_handler);
 
-	gpio_init_callback(&button_cb_data, button_pressed, BIT(sw0.pin));
-	gpio_add_callback(sw0.port, &button_cb_data);
+	gpio_pin_configure_dt(&btn_p5, GPIO_INPUT | btn_p5.dt_flags);
+	gpio_pin_configure_dt(&btn_p4, GPIO_INPUT | btn_p4.dt_flags);
 
-	printk("HID Ready out of loop. Deep sleeping...\n");
+	/* We only care about the Falling edge (P5 -> GND) */
+	gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_TO_ACTIVE);
+	gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_TO_ACTIVE);
+
+	gpio_init_callback(&cb_p5, button_pressed, BIT(btn_p5.pin));
+	gpio_init_callback(&cb_p4, button_pressed, BIT(btn_p4.pin));
+
+	gpio_add_callback(btn_p5.port, &cb_p5);
+	gpio_add_callback(btn_p4.port, &cb_p4);
+
+	printk("Single-trigger HID Ready.\n");
 	k_sleep(K_FOREVER);
 }
