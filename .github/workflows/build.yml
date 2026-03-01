@@ -11,6 +11,7 @@ env:
   ZEPHYR_SDK_VERSION: "0.17.0"
   ZEPHYR_WORKSPACE: ${{ github.workspace }}/zephyrproject
   ZEPHYR_SDK_DIR: ${{ github.workspace }}/zephyr-sdk-0.17.0
+  ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk-0.17.0
   BOARD: nrf52840_mdk
 
 jobs:
