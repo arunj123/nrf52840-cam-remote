@@ -19,7 +19,7 @@ To recover or flash the device manually (if the USB bootloader is missing or loc
 - **Trigger Pin (Primary)**: Pin labeled **P4** (P0.04) shorted to **GND**.
 - **Trigger Pin (Secondary)**: Pin labeled **P5** (P0.05) shorted to **GND**.
 - **Buzzer Feedback**: Connect a **Passive Ceramic Piezo** wafer between **P2** (P0.02) and **GND**.
-- **Action**: Triggers a Red LED pulse, a **50ms (2kHz) acoustic beep**, and sends the Bluetooth "Volume Up" command.
+- **Action**: Triggers a Red LED pulse, a **50ms (4kHz) acoustic beep**, and sends the Bluetooth "Volume Up" command.
 
 ### LED & Audio Feedback
 - **🔵 Blue**: Advertising (Looking for a pair).
@@ -50,7 +50,8 @@ The firmware reports battery level to your phone via BLE Battery Service (BAS).
 The project was recently refactored to **Modern C++20** for improved modularity and safety.
 - **OS**: Zephyr RTOS v4.x
 - **Standard**: C++20 (using `std::span`, `std::array`, and structured classes)
-- **Logic**: Encapsulated in `remote::HidService`, `remote::BluetoothManager`, and `remote::LedController`.
+- **Logic**: Encapsulated in `remote::HidService`, `remote::BluetoothManager`, `remote::LedController`, `remote::BuzzerController`, and `remote::BatteryMonitor`.
+- **Button Engine**: Dedicated thread with message queue (ISR → `k_msgq` → thread). Deadlock-proof.
 - **Profile**: Consumer Control (Media Remote) via HOGP.
 - **Pairing**: "Just Works" (no PIN required, encrypted link with bonding).
 
