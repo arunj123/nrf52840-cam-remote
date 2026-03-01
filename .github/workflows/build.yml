@@ -93,12 +93,12 @@ jobs:
       run: |
         cd ${ZEPHYR_WORKSPACE}
         west build -b ${BOARD} \
-          -d ${{ github.workspace }}/nrf_control/app/build \
-          ${{ github.workspace }}/nrf_control/app
+          -d ${{ github.workspace }}/nrf_control/firmware/build \
+          ${{ github.workspace }}/nrf_control/firmware
 
     # ---------- Artifacts ----------
     - name: Upload firmware hex
       uses: actions/upload-artifact@v4
       with:
         name: camera-remote-firmware
-        path: nrf_control/app/build/zephyr/zephyr.hex
+        path: nrf_control/firmware/build/zephyr/zephyr.hex

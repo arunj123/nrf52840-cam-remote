@@ -23,9 +23,10 @@ if [[ -f "${SCRIPT_DIR}/build.env" ]]; then
 fi
 
 # --- Configuration (defaults are relative to the project) ---
-ZEPHYR_WORKSPACE="${ZEPHYR_WORKSPACE:-$(dirname "${SCRIPT_DIR}")/zephyrproject}"
+# Defaults to a sibling directory of this project root. Override with env vars.
+ZEPHYR_WORKSPACE="${ZEPHYR_WORKSPACE:-$(dirname "$(dirname "${SCRIPT_DIR}")")/zephyrproject}"
 ZEPHYR_SDK_VERSION="0.17.0"
-ZEPHYR_SDK_DIR="${ZEPHYR_SDK_DIR:-$(dirname "${SCRIPT_DIR}")/zephyr-sdk-${ZEPHYR_SDK_VERSION}}"
+ZEPHYR_SDK_DIR="${ZEPHYR_SDK_DIR:-$(dirname "$(dirname "${SCRIPT_DIR}")")/zephyr-sdk-${ZEPHYR_SDK_VERSION}}"
 CI_MODE=false
 
 if [[ "${1:-}" == "--ci" ]]; then

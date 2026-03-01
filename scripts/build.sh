@@ -15,12 +15,12 @@ if [[ -f "${SCRIPT_DIR}/build.env" ]]; then
     source "${SCRIPT_DIR}/build.env"
 fi
 
-APP_DIR="${SCRIPT_DIR}/app"
+APP_DIR="$(dirname "${SCRIPT_DIR}")/firmware"
 BUILD_DIR="${APP_DIR}/build"
 BOARD="nrf52840_mdk"
 
-# Defaults are relative to the project. Override in build.env.
-ZEPHYR_WORKSPACE="${ZEPHYR_WORKSPACE:-$(dirname "${SCRIPT_DIR}")/zephyrproject}"
+# Defaults to a sibling directory of this project root. Override with env vars.
+ZEPHYR_WORKSPACE="${ZEPHYR_WORKSPACE:-$(dirname "$(dirname "${SCRIPT_DIR}")")/zephyrproject}"
 VENV_DIR="${ZEPHYR_WORKSPACE}/.venv"
 
 PRISTINE=""
@@ -64,8 +64,8 @@ if $DO_FLASH; then
     cp "${HEX_FILE}" "${WINDOWS_FLASH_DIR}/app.hex"
 
     # Also copy the OpenOCD config if present
-    if [[ -f "${SCRIPT_DIR}/nrf52_stlink.cfg" ]]; then
-        cp "${SCRIPT_DIR}/nrf52_stlink.cfg" "${WINDOWS_FLASH_DIR}/nrf52_stlink.cfg"
+    if [[ -f "$(dirname "${SCRIPT_DIR}")/nrf52_stlink.cfg" ]]; then
+        cp "$(dirname "${SCRIPT_DIR}")/nrf52_stlink.cfg" "${WINDOWS_FLASH_DIR}/nrf52_stlink.cfg"
     fi
 
     echo "Copied to ${WINDOWS_FLASH_DIR}/app.hex"
