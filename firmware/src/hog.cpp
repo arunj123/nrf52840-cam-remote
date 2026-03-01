@@ -210,6 +210,7 @@ int click_count = 0;
 int64_t last_press_time = 0;
 int64_t last_gesture_end_time = 0;
 bool gesture_in_progress = false;
+bool gesture_executing = false;  // true while an action is running (blocks ISR)
 
 struct k_work_delayable gesture_timeout_work;
 struct k_work_delayable long_press_work;
@@ -230,6 +231,7 @@ void reset_gesture_state()
     k_work_cancel_delayable(&long_press_work);
     click_count = 0;
     gesture_in_progress = false;
+    gesture_executing = false;
     last_gesture_end_time = k_uptime_get();
 }
 
@@ -237,6 +239,7 @@ void reset_gesture_state()
 
 void action_single_click()
 {
+    gesture_executing = true;
     printk("GESTURE: Single Click -> Photo\n");
     led_set_trigger_active(true);
 
@@ -250,11 +253,17 @@ void action_single_click()
 
 void action_double_click()
 {
-    printk("GESTURE: Double Click -> Video Start/Stop\n");
+    gesture_executing = true;
+    printk("GESTURE: Double Click -> Quick double-tap Volume Up\n");
     buzzer_double_beep();
     led_set_trigger_active(true);
 
-    send_hid_report(static_cast<uint8_t>(HidKey::PlayPause));
+    // Send two quick Volume Up taps (works better than Play/Pause on camera apps)
+    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+    k_msleep(100);
+    send_hid_report(0x00);
+    k_msleep(150);
+    send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
     k_msleep(100);
     send_hid_report(0x00);
 
@@ -264,6 +273,7 @@ void action_double_click()
 
 void action_long_press()
 {
+    gesture_executing = true;
     printk("GESTURE: Long Press -> Burst Mode\n");
     buzzer_long_beep();
     led_set_trigger_active(true);
@@ -279,6 +289,7 @@ void action_long_press()
 
 void action_self_timer()
 {
+    gesture_executing = true;
     printk("GESTURE: Triple Click -> Self-Timer\n");
     led_set_trigger_active(true);
 
@@ -342,6 +353,9 @@ void long_press_handler(struct k_work *work)
 
 void button_pressed(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
+    // Block all input while a gesture action is executing
+    if (gesture_executing) return;
+
     if (!(gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4))) {
         return;
     }
