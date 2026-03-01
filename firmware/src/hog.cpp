@@ -230,6 +230,7 @@ void do_single_click(struct k_work *work)
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
+    last_press_time = k_uptime_get();  // catch release bounce
     busy = false;
 }
 
@@ -242,6 +243,10 @@ void do_long_press(struct k_work *work)
     }
 
     busy = true;
+
+    // Cancel any pending single-click from release bounce
+    k_work_cancel(&single_click_work);
+
     printk("ACTION: Long Press -> Burst Mode\n");
     buzzer_long_beep();
     led_set_trigger_active(true);
@@ -251,6 +256,7 @@ void do_long_press(struct k_work *work)
     send_hid_report(0x00);
 
     led_set_trigger_active(false);
+    last_press_time = k_uptime_get();  // catch release bounce
     busy = false;
 }
 
