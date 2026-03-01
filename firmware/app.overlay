@@ -7,7 +7,7 @@
 	pwm_buzzers {
 		compatible = "pwm-leds";
 		pwm_buzzer0: pwm_buzzer_0 {
-			pwms = <&pwm0 0 PWM_HZ(2000) PWM_POLARITY_NORMAL>;
+			pwms = <&pwm0 0 PWM_HZ(4000) PWM_POLARITY_NORMAL>;
 			label = "PWM Buzzer";
 		};
 	};
