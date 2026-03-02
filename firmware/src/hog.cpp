@@ -184,7 +184,7 @@ BT_GATT_SERVICE_DEFINE(hog_svc,
 // ─── Button Handler (Thread-based state machine) ─────────────────
 
 
-// ─── Button Engine (Polled — no GPIOTE interrupts) ───────────────
+// ─── Button Engine (Interrupt-driven) ───────────────
 
 namespace {
 
@@ -203,6 +203,16 @@ constexpr int kPollMs = 20;
 constexpr int kDebounceMs = 60;
 constexpr int kLongPressMs = 800;
 constexpr int kBurstHoldMs = 2000;
+
+// ─── Button synchronization ─────────────────────────────────────
+K_SEM_DEFINE(btn_sem, 0, 1);
+static struct gpio_callback btn_p5_cb_data;
+static struct gpio_callback btn_p4_cb_data;
+
+static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+    k_sem_give(&btn_sem);
+}
 
 // ─── HID report (only sends if connected) ───────────────────────
 void send_hid_report(uint8_t key_bits)
@@ -223,24 +233,27 @@ bool is_button_held()
     return gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4);
 }
 
-// ─── Button thread (polling) ────────────────────────────────────
+// ─── Button thread (sleeping) ───────────────────────────────────
 
 K_THREAD_STACK_DEFINE(btn_stack, 2048);
 struct k_thread btn_thread_data;
 
 void button_thread(void *, void *, void *)
 {
-    printk("Button thread started (polling)\n");
-    bool prev = false;
+    printk("Button thread started (interrupt-driven)\n");
 
     while (true) {
-        k_msleep(kPollMs);
+        // Go to sleep (System ON idle) until a button interrupt wakes us up
+        printk("Zzz... Sleeping\n");
+        k_sem_take(&btn_sem, K_FOREVER);
+        printk("Woke up!\n");
+        
         bool now = is_button_held();
 
-        if (now && !prev) {
+        if (now) {
             // Rising edge — debounce
             k_msleep(kDebounceMs);
-            if (!is_button_held()) { prev = false; continue; }
+            if (!is_button_held()) continue;
 
             printk("BTN: Press\n");
 
@@ -251,7 +264,7 @@ void button_thread(void *, void *, void *)
             send_hid_report(0x00);
             led_set_trigger_active(false);
 
-            // Check for long press
+            // Check for long press (poll while held)
             int64_t t0 = k_uptime_get();
             bool burst = false;
             while (is_button_held()) {
@@ -271,9 +284,10 @@ void button_thread(void *, void *, void *)
             }
 
             k_msleep(kDebounceMs);
+            // Clear any semaphore gives that happened while we were busy
+            k_sem_reset(&btn_sem);
             printk("BTN: Ready\n");
         }
-        prev = now;
     }
 }
 
@@ -328,8 +342,17 @@ void HidService::run_button_loop()
 {
     gpio_pin_configure_dt(&btn_p5, GPIO_INPUT | btn_p5.dt_flags);
     gpio_pin_configure_dt(&btn_p4, GPIO_INPUT | btn_p4.dt_flags);
-    // No GPIOTE interrupts — button thread polls directly
-    printk("HID Ready: Press=Photo, Hold=Burst (polled)\n");
+
+    gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_BOTH);
+    gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_BOTH);
+
+    gpio_init_callback(&btn_p5_cb_data, button_pressed_isr, BIT(btn_p5.pin));
+    gpio_add_callback_dt(&btn_p5, &btn_p5_cb_data);
+
+    gpio_init_callback(&btn_p4_cb_data, button_pressed_isr, BIT(btn_p4.pin));
+    gpio_add_callback_dt(&btn_p4, &btn_p4_cb_data);
+
+    printk("HID Ready: Press=Photo, Hold=Burst (interrupt-driven)\n");
     k_sleep(K_FOREVER);
 }
 

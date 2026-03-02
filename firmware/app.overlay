@@ -13,6 +13,9 @@
  *   - Disables UART0 to free P0.05 (used as RTS by default)
  */
 
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+
 / {
 	aliases {
 		sw0 = &button0;
@@ -39,6 +42,21 @@
 			label = "P4 Trigger";
 			zephyr,code = <INPUT_KEY_1>;
 		};
+	};
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_VDD>;
+		zephyr,resolution = <10>;
 	};
 };
 
