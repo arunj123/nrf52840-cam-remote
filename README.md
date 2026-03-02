@@ -21,6 +21,18 @@ To recover or flash the device manually (if the USB bootloader is missing or loc
 - **Buzzer Feedback**: Connect a **Passive Ceramic Piezo** wafer between **P2** (P0.02) and **GND**.
 - **Action**: Triggers a Red LED pulse, a **50ms (4kHz) acoustic beep**, and sends the Bluetooth "Volume Up" command.
 
+### Rotary Encoder (Optional)
+For volume control, a rotary encoder (e.g., EC11) can be connected to the following pins on Header 1:
+
+| Dongle Header Pin | nRF52840 GPIO | Encoder Component | Function |
+| :--- | :--- | :--- | :--- |
+| **Pin 5** | `P0.03` | **Phase A** | Quad Decoder A |
+| **Pin 8** | `P0.06` | **Phase B** | Quad Decoder B |
+| **Pin 9** | `P0.07` | **Switch (Button)** | Mute Toggle |
+| **Pin 2** | **GND** | **Common (C)** | Ground Reference |
+
+> **Note**: Internal pull-up resistors are enabled in software, so no external pull-ups are required for mechanical encoders.
+
 ### LED & Audio Feedback
 - **🔵 Blue**: Advertising (Looking for a pair).
 - **🟢 Green**: Connected (Ready to use).
