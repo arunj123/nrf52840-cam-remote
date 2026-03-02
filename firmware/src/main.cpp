@@ -69,107 +69,42 @@ public:
         gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
         gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
-        last_activity = k_uptime_get();
-        k_work_init_delayable(&heartbeat_work, heartbeat_handler);
-        k_work_reschedule(&heartbeat_work, K_SECONDS(kHeartbeatIntervalSec));
     }
 
     static void set_connected(bool connected) {
-        is_connected = connected;
-        wake_leds();
-        apply_state();
+        gpio_pin_set_dt(&led_green, connected ? 1 : 0);
     }
 
     static void set_advertising(bool advertising) {
-        is_advertising = advertising;
-        wake_leds();
-        apply_state();
+        gpio_pin_set_dt(&led_blue, advertising ? 1 : 0);
     }
 
     static void set_trigger_active(bool active) {
-        wake_leds();
         if (active) {
             gpio_pin_set_dt(&led_green, 0);
             gpio_pin_set_dt(&led_red, 1);
             BuzzerController::beep();
         } else {
             gpio_pin_set_dt(&led_red, 0);
-            apply_state();
-        }
-    }
-
-    static void wake_leds() {
-        last_activity = k_uptime_get();
-        if (leds_dimmed) {
-            leds_dimmed = false;
-            apply_state();
+            gpio_pin_set_dt(&led_green, 1);
         }
     }
 
 private:
-    static void apply_state() {
-        if (leds_dimmed) return;
-        gpio_pin_set_dt(&led_green, is_connected ? 1 : 0);
-        gpio_pin_set_dt(&led_blue, is_advertising ? 1 : 0);
-    }
-
-    static void all_off() {
-        gpio_pin_set_dt(&led_green, 0);
-        gpio_pin_set_dt(&led_red, 0);
-        gpio_pin_set_dt(&led_blue, 0);
-    }
-
-    // Runs in system workqueue (thread context) — safe for printk, k_msleep
-    static void heartbeat_handler(struct k_work *work) {
-        int64_t idle_ms = k_uptime_get() - last_activity;
-
-        if (idle_ms > (kIdleTimeoutSec * 1000)) {
-            if (!leds_dimmed) {
-                all_off();
-                leds_dimmed = true;
-                printk("LED: Dimmed after %lld s idle\n", idle_ms / 1000);
-            }
-
-            // Quick heartbeat blink (safe — we're in thread context)
-            if (is_connected) {
-                gpio_pin_set_dt(&led_green, 1);
-                k_msleep(50);
-                gpio_pin_set_dt(&led_green, 0);
-            } else if (is_advertising) {
-                gpio_pin_set_dt(&led_blue, 1);
-                k_msleep(50);
-                gpio_pin_set_dt(&led_blue, 0);
-            }
-        }
-
-        // Reschedule ourselves
-        k_work_reschedule(&heartbeat_work, K_SECONDS(kHeartbeatIntervalSec));
-    }
-
     static inline const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
     static inline const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
     static inline const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET(DT_ALIAS(led2), gpios);
-
-    static inline struct k_work_delayable heartbeat_work;
-    static inline int64_t last_activity = 0;
-    static inline bool is_connected = false;
-    static inline bool is_advertising = false;
-    static inline bool leds_dimmed = false;
-
-    static constexpr int kIdleTimeoutSec = 30;
-    static constexpr int kHeartbeatIntervalSec = 5;
 };
 
 } // namespace remote
+
 
 
 extern "C" void led_set_trigger_active(bool active) {
     remote::LedController::set_trigger_active(active);
 }
 
-extern "C" void led_wake() {
-    remote::LedController::wake_leds();
-}
+
 
 extern "C" void buzzer_beep() {
     remote::BuzzerController::beep();
