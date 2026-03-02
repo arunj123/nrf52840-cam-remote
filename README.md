@@ -26,13 +26,13 @@ To recover or flash the device manually (if the USB bootloader is missing or loc
 - **🟢 Green**: Connected (Ready to use).
 - **🔴 Red + 🔊 Beep**: Trigger detected.
 
-> **Note**: A **passive ceramic piezo buzzer** is used for audio feedback (connected between P2 and GND, driven by 4kHz PWM).
+> **Note**: To maximize battery life, LEDs are automatically disabled during idle sleep while connected or advertising. A **passive ceramic piezo buzzer** is used for audio feedback (connected between P2 and GND, driven by 4kHz PWM).
 
 ### Click Modes
 | Gesture | Action | Buzzer Feedback |
 |---------|--------|------------------|
 | **Press** | Photo / Video Start-Stop (Volume Up) | 1 short beep |
-| **Hold >1s** | Burst Mode (hold Volume Up 2s) | 1 long beep |
+| **Hold >0.8s** | Burst Mode (hold Volume Up 2s) | 1 long beep |
 
 > **iPhone**: On iPhone 11+, holding Volume Up triggers QuickTake by default. To enable burst: **Settings > Camera > Use Volume Up for Burst**.
 
@@ -43,21 +43,21 @@ The firmware reports battery level to your phone via BLE Battery Service (BAS).
 - Battery level updates every 60 seconds and appears in your phone's Bluetooth settings.
 
 ### Power Management
-- **Auto-sleep**: CPU enters low-power idle when waiting for button events.
-- **DC/DC mode**: Enabled by default for lower quiescent current.
-- **Device PM**: Peripherals (PWM, ADC) suspended when idle.
-- **Wake**: Any GPIO button press instantly wakes the device.
+- **System ON Idle**: CPU enters low-power idle (WFE/WFI) when waiting for button events.
+- **Interrupt-driven**: The button engine uses GPIO interrupts to wake the system from sleep, ensuring zero power waste during polling.
+- **DC/DC mode**: Enabled for lower quiescent current.
+- **LED Dimming**: Status LEDs are switched off during sleep states to prolong battery life.
 
 ---
 
 ## 2. Software & Development
 
 ### Architecture (Modern C++ Refactor)
-The project was recently refactored to **Modern C++20** for improved modularity and safety.
+The project is built using **Modern C++20** for improved modularity and safety.
 - **OS**: Zephyr RTOS v4.x
 - **Standard**: C++20 (using `std::span`, `std::array`, and structured classes)
 - **Logic**: Encapsulated in `remote::HidService`, `remote::BluetoothManager`, `remote::LedController`, `remote::BuzzerController`, and `remote::BatteryMonitor`.
-- **Button Engine**: Dedicated thread with message queue (ISR → `k_msgq` → thread). Deadlock-proof.
+- **Button Engine**: Interrupt-driven thread with automated power-saving sleep. Deadlock-proof.
 - **Profile**: Consumer Control (Media Remote) via HOGP.
 - **Pairing**: "Just Works" (no PIN required, encrypted link with bonding).
 
@@ -169,9 +169,10 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 ## 5. Bluetooth Details
 - **Device Name**: `Cam Remote Pro`
 - **Appearance**: Remote Control (384)
-- **PnP ID**: Vendor `0x05AC`, Product `0x0220` (for driver-less Windows compatibility)
+- **PnP ID**: Vendor `0x05AC`, Product `0x0220` (Apple Vendor ID used for driver-less Windows compatibility)
 - **Security**: "Just Works" encryption (BT_SECURITY_L2). No passkey required.
-- **Re-advertising**: The device automatically restarts advertising after disconnection.
+- **Advertising Watchdog**: Background worker ensures advertising automatically restarts if the BLE stack hits an error or if the device disconnects.
+- **Persistent Bonding**: Pairing info is stored in NVS, allowing auto-reconnection after power cycles.
 
 ---
 
