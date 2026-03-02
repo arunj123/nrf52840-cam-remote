@@ -195,6 +195,10 @@ extern "C" void buzzer_long_beep();
 struct gpio_callback cb_p5;
 struct gpio_callback cb_p4;
 
+// ─── Connection tracking ────────────────────────────────────────
+// Set from BLE connect/disconnect callbacks in main.cpp
+volatile struct bt_conn *active_conn = nullptr;
+
 // ─── Message queue: ISR → Thread ─────────────────────────────────
 // ISR puts events here, thread reads them. Zero shared mutable state.
 enum class BtnEvent : uint8_t { Press = 1 };
@@ -207,10 +211,15 @@ constexpr int64_t kLongPressMs = 800;    // Threshold to detect long press
 constexpr int64_t kBurstHoldMs = 2000;   // How long to hold Volume Up for burst
 constexpr int64_t kPollIntervalMs = 50;  // How often to check if button is held
 
-// ─── HID report ─────────────────────────────────────────────────
+// ─── HID report (only sends if connected) ───────────────────────
 void send_hid_report(uint8_t key_bits)
 {
-    int err = bt_gatt_notify(nullptr, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
+    struct bt_conn *conn = (struct bt_conn *)active_conn;
+    if (!conn) {
+        printk("HID: no connection, skipping\n");
+        return;
+    }
+    int err = bt_gatt_notify(conn, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
     if (err) {
         printk("HID: notify failed (err %d)\n", err);
     }
@@ -241,8 +250,7 @@ void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pin
 }
 
 // ─── Button thread ──────────────────────────────────────────────
-// This thread is the ONLY place that sends HID reports and buzzer
-// feedback. It processes one event at a time, sequentially.
+// Always beeps and flashes LED. Only sends HID if BLE is connected.
 
 K_THREAD_STACK_DEFINE(btn_stack, 2048);
 struct k_thread btn_thread_data;
@@ -259,7 +267,7 @@ void button_thread(void *, void *, void *)
 
         printk("BTN: Press detected\n");
 
-        // ── STEP 1: Fire single click immediately ──
+        // ── STEP 1: Single click (ALWAYS beeps, sends HID if connected) ──
         led_set_trigger_active(true);
         send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
         k_msleep(100);
@@ -294,7 +302,7 @@ void button_thread(void *, void *, void *)
             led_set_trigger_active(false);
         }
 
-        // ── STEP 4: Drain any bounce events that queued during execution ──
+        // ── STEP 4: Drain bounce events ──
         k_msgq_purge(&btn_msgq);
 
         // Small gap before accepting new input
@@ -305,6 +313,23 @@ void button_thread(void *, void *, void *)
 }
 
 } // namespace
+
+// ─── Connection tracking (called from main.cpp BLE callbacks) ────
+
+extern "C" void hid_set_conn(struct bt_conn *conn)
+{
+    active_conn = bt_conn_ref(conn);
+    printk("HID: Connection set\n");
+}
+
+extern "C" void hid_clear_conn()
+{
+    if (active_conn) {
+        bt_conn_unref((struct bt_conn *)active_conn);
+        active_conn = nullptr;
+    }
+    printk("HID: Connection cleared\n");
+}
 
 // ─── Public HidService methods ───────────────────────────────────
 

@@ -187,6 +187,10 @@ extern "C" void buzzer_countdown_beep() {
     remote::BuzzerController::countdown_beep();
 }
 
+// Connection tracking bridge (defined in hog.cpp)
+extern "C" void hid_set_conn(struct bt_conn *conn);
+extern "C" void hid_clear_conn();
+
 namespace remote {
 
 class BluetoothManager {
@@ -262,6 +266,7 @@ private:
         }
 
         printk("Connected: %s\n", addr);
+        hid_set_conn(conn);
         LedController::set_connected(true);
         LedController::set_advertising(false);
 
@@ -275,6 +280,7 @@ private:
         bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
         printk("Disconnected: %s (reason 0x%02x)\n", addr, reason);
+        hid_clear_conn();
         LedController::set_connected(false);
         start_advertising();
     }
