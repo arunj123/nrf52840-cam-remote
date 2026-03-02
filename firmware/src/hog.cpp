@@ -244,7 +244,7 @@ void button_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pin
 // This thread is the ONLY place that sends HID reports and buzzer
 // feedback. It processes one event at a time, sequentially.
 
-K_THREAD_STACK_DEFINE(btn_stack, 1024);
+K_THREAD_STACK_DEFINE(btn_stack, 2048);
 struct k_thread btn_thread_data;
 
 void button_thread(void *, void *, void *)
