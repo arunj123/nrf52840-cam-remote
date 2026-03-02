@@ -182,13 +182,22 @@ private:
             { .type = BT_DATA_UUID128_ALL, .data_len = sizeof(sd_uuid), .data = sd_uuid },
         }};
 
-        int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad.data(), ad.size(), sd.data(), sd.size());
-        if (err) {
-            printk("Advertising failed (err %d)\n", err);
-        } else {
-            printk("Advertising started\n");
-            LedController::set_advertising(true);
+        // Stop any existing advertising first
+        bt_le_adv_stop();
+
+        // Retry advertising up to 3 times
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            int err = bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad.data(), ad.size(), sd.data(), sd.size());
+            if (!err) {
+                printk("Advertising started (attempt %d)\n", attempt + 1);
+                LedController::set_advertising(true);
+                return;
+            }
+            printk("Advertising failed (err %d), retry %d\n", err, attempt + 1);
+            k_msleep(500);
+            bt_le_adv_stop();
         }
+        printk("Advertising FAILED after 3 attempts!\n");
     }
 
     static void connected(struct bt_conn *conn, uint8_t err) {
