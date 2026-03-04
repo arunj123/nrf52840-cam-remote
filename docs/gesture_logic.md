@@ -2,61 +2,74 @@
 
 This diagram illustrates the state transitions and timing logic for the `GestureEngine` (main button handling).
 
-![Gesture Engine State Machine](gesture_logic.png)
-
-## Technical Source (Mermaid)
+## Logic Diagram
+```mermaid
 stateDiagram-v2
+    direction LR
+
+    %% Styles
+    classDef idle fill:#2d3436,stroke:#0984e3,stroke-width:2px,color:#fff
+    classDef proc fill:#2d3436,stroke:#fdcb6e,stroke-width:2px,color:#fff
+    classDef act fill:#2d3436,stroke:#00b894,stroke-width:2px,color:#fff
+    classDef wait fill:#2d3436,stroke:#d63031,stroke-width:2px,color:#fff
+
     [*] --> Idle
+    Idle --> DB : onWake
     
-    state Idle {
-        [*] --> WaitingForInterrupt
+    state "Debouncing" as DB {
+        direction LR
+        [*] --> Check
+        Check --> Sleep60
+        Sleep60 --> Verify
     }
     
-    Idle --> Debouncing : on_wake
+    DB --> Idle : Glitch
+    DB --> Click : Held
     
-    state Debouncing {
-        [*] --> CheckHigh
-        CheckHigh --> Sleep60ms
-        Sleep60ms --> VerifyHigh
+    state "Single Click" as Click {
+        direction LR
+        [*] --> HID_Up
+        HID_Up --> Delay
+        Delay --> HID_Rel
     }
     
-    Debouncing --> Idle : GlitchDetected
-    Debouncing --> TriggerClick : ButtonHeld
+    Click --> Poll : Entry
     
-    state TriggerClick {
-        [*] --> SendVolumeUp
-        SendVolumeUp --> LedAndHidDelay
-        LedAndHidDelay --> SendRelease
+    state "Long Press Detection" as Poll {
+        direction LR
+        [*] --> Sleep20
+        Sleep20 --> CheckT
+        CheckT --> Sleep20 : <800ms
     }
     
-    TriggerClick --> LongPressPolling
+    Poll --> Idle : Released
+    Poll --> Burst : Held >= 800ms
     
-    state LongPressPolling {
-        [*] --> PollLoop
-        PollLoop --> LPSleep20ms
-        LPSleep20ms --> CheckDuration
-        CheckDuration --> PollLoop : Under800ms
+    state "Burst Mode" as Burst {
+        direction LR
+        [*] --> Beep
+        Beep --> BurstUp
+        BurstUp --> Sleep2s
+        Sleep2s --> BurstRel
     }
     
-    LongPressPolling --> Idle : ShortPressComplete
-    LongPressPolling --> TriggerBurst : HeldLong
+    Burst --> WaitRel
     
-    state TriggerBurst {
-        [*] --> BeepLong
-        BeepLong --> SendBurstUp
-        SendBurstUp --> Sleep2000ms
-        Sleep2000ms --> SendBurstRelease
+    state "Wait for Release" as WaitRel {
+        direction LR
+        [*] --> PollRel
+        PollRel --> Sleep20_F
+        Sleep20_F --> PollRel : StillHeld
     }
     
-    TriggerBurst --> WaitingForFinalRelease
-    
-    state WaitingForFinalRelease {
-        [*] --> FinalPoll
-        FinalPoll --> FRSleep20ms
-        FRSleep20ms --> FinalPoll : StillHeld
-    }
-    
-    WaitingForFinalRelease --> Idle : Released
+    WaitRel --> Idle : Released
+
+    class Idle idle
+    class DB proc
+    class Click act
+    class Poll proc
+    class Burst act
+    class WaitRel wait
 ```
 
 ## Timing Constants
