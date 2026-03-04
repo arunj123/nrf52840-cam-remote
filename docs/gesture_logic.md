@@ -14,38 +14,38 @@ stateDiagram-v2
     classDef wait fill:#2d3436,stroke:#d63031,stroke-width:2px,color:#fff
 
     [*] --> Idle
-    Idle --> DB : onWake
+    Idle --> S_Debounce : onWake
     
-    state "Debouncing" as DB {
+    state "Debouncing" as S_Debounce {
         direction LR
         [*] --> Check
         Check --> Sleep60
         Sleep60 --> Verify
     }
     
-    DB --> Idle : Glitch
-    DB --> Click : Held
+    S_Debounce --> Idle : Glitch
+    S_Debounce --> S_Click : Held
     
-    state "Single Click" as Click {
+    state "Single Click" as S_Click {
         direction LR
         [*] --> HID_Up
         HID_Up --> Delay
         Delay --> HID_Rel
     }
     
-    Click --> Poll : Entry
+    S_Click --> S_Poll : Entry
     
-    state "Long Press Detection" as Poll {
+    state "Long Press Detection" as S_Poll {
         direction LR
         [*] --> Sleep20
         Sleep20 --> CheckT
         CheckT --> Sleep20 : <800ms
     }
     
-    Poll --> Idle : Released
-    Poll --> Burst : Held >= 800ms
+    S_Poll --> Idle : Released
+    S_Poll --> S_Burst : HeldLong
     
-    state "Burst Mode" as Burst {
+    state "Burst Mode" as S_Burst {
         direction LR
         [*] --> Beep
         Beep --> BurstUp
@@ -53,23 +53,23 @@ stateDiagram-v2
         Sleep2s --> BurstRel
     }
     
-    Burst --> WaitRel
+    S_Burst --> S_WaitRel
     
-    state "Wait for Release" as WaitRel {
+    state "Wait for Release" as S_WaitRel {
         direction LR
         [*] --> PollRel
         PollRel --> Sleep20_F
         Sleep20_F --> PollRel : StillHeld
     }
     
-    WaitRel --> Idle : Released
+    S_WaitRel --> Idle : Released
 
     class Idle idle
-    class DB proc
-    class Click act
-    class Poll proc
-    class Burst act
-    class WaitRel wait
+    class S_Debounce proc
+    class S_Click act
+    class S_Poll proc
+    class S_Burst act
+    class S_WaitRel wait
 ```
 
 ## Timing Constants
