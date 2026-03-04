@@ -2,7 +2,9 @@
 
 This diagram illustrates the state transitions and timing logic for the `GestureEngine` (main button handling).
 
-```mermaid
+![Gesture Engine State Machine](gesture_logic.png)
+
+## Technical Source (Mermaid)
 stateDiagram-v2
     [*] --> Idle
     
