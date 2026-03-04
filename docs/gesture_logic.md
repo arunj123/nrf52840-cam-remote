@@ -10,53 +10,51 @@ stateDiagram-v2
         [*] --> WaitingForInterrupt
     }
     
-    Idle --> Debouncing : on_main_button_wake()
+    Idle --> Debouncing : on_wake
     
     state Debouncing {
         [*] --> CheckHigh
-        CheckHigh --> sleep_60ms
-        sleep_60ms --> VerifyHigh
+        CheckHigh --> Sleep60ms
+        Sleep60ms --> VerifyHigh
     }
     
-    Debouncing --> Idle : Button Released (Glitch)
-    
-    Debouncing --> TriggerClick : Button Still Held
+    Debouncing --> Idle : GlitchDetected
+    Debouncing --> TriggerClick : ButtonHeld
     
     state TriggerClick {
         [*] --> SendVolumeUp
-        SendVolumeUp --> LedAndHid_100ms
-        LedAndHid_100ms --> SendRelease
+        SendVolumeUp --> LedAndHidDelay
+        LedAndHidDelay --> SendRelease
     }
     
     TriggerClick --> LongPressPolling
     
     state LongPressPolling {
         [*] --> PollLoop
-        PollLoop --> sleep_20ms
-        sleep_20ms --> CheckDuration
-        CheckDuration --> PollLoop : < 800ms
+        PollLoop --> LPSleep20ms
+        LPSleep20ms --> CheckDuration
+        CheckDuration --> PollLoop : Under800ms
     }
     
-    LongPressPolling --> Idle : Released < 800ms
-    
-    LongPressPolling --> TriggerBurst : Held >= 800ms
+    LongPressPolling --> Idle : ShortPressComplete
+    LongPressPolling --> TriggerBurst : HeldLong
     
     state TriggerBurst {
         [*] --> BeepLong
-        BeepLong --> SendVolumeUp_Burst
-        SendVolumeUp_Burst --> sleep_2000ms
-        sleep_2000ms --> SendRelease_Burst
+        BeepLong --> SendBurstUp
+        SendBurstUp --> Sleep2000ms
+        Sleep2000ms --> SendBurstRelease
     }
     
     TriggerBurst --> WaitingForFinalRelease
     
     state WaitingForFinalRelease {
         [*] --> FinalPoll
-        FinalPoll --> sleep_20ms
-        sleep_20ms --> FinalPoll : Still Held
+        FinalPoll --> FRSleep20ms
+        FRSleep20ms --> FinalPoll : StillHeld
     }
     
-    WaitingForFinalRelease --> Idle : Final Release
+    WaitingForFinalRelease --> Idle : Released
 ```
 
 ## Timing Constants
