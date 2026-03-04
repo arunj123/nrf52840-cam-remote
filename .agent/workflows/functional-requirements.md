@@ -18,10 +18,12 @@ The device must act as a Bluetooth Low Energy (BLE) Human Interface Device (HID)
 ### FR-03: Rotary Encoder Support
 - **Clockwise (CW)**: Send HID 'Volume Up'.
 - **Counter-Clockwise (CCW)**: Send HID 'Volume Down'.
-- **Encoder Button Click**: Send HID 'Mute' toggle.
+- **Encoder Button Short Click**: Send HID 'Mute' toggle.
+- **Encoder Button Long Press (>800ms)**: Cycle active device profile (see FR-06).
 
 ### FR-04: Audio/Visual Feedback
 - **Acoustic**: Short 4kHz PWM beep for clicks; long 50ms beep for entry into Long Press/Burst mode.
+- **Profile Switch**: N+1 short beeps to indicate slot N (1 beep = slot 0, 2 = slot 1, 3 = slot 2).
 - **Visual (RGB LED)**:
     - **Blue (Blinking)**: Advertising / Pairing mode.
     - **Green**: Connected.
@@ -32,6 +34,18 @@ The device must act as a Bluetooth Low Energy (BLE) Human Interface Device (HID)
 - Monitor internal VDD via SAADC.
 - Report battery percentage (0-100%) via BLE Battery Service (BAS).
 - Update frequency: once per 60 seconds.
+
+### FR-06: Multi-Device Profiles
+- Support bonding with up to **3 devices** (`CONFIG_BT_MAX_PAIRED=3`).
+- Only **one connection active** at a time.
+- User cycles the active profile slot via encoder button long-press.
+- On switch: disconnect current peer → advertising watchdog re-advertises.
+- Active slot index persisted in NVS across power cycles.
+
+### FR-07: Provisioning Service (Future)
+- Custom BLE GATT service (vendor-specific 128-bit UUID) for button-function programming.
+- Skeleton only: accepts writes to a button-map characteristic but takes no action.
+- Will eventually allow a companion app to configure what each button/gesture does per profile.
 
 ## 2. Non-Functional Requirements (NFR)
 

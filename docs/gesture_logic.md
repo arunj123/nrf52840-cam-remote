@@ -1,8 +1,8 @@
 # Gesture Engine Logic
 
-This diagram illustrates the state transitions and timing logic for the `GestureEngine` (main button handling).
+This diagram illustrates the state transitions and timing logic for the `GestureEngine` (main button and encoder button handling).
 
-## Logic Diagram
+## Main Button Logic
 ```mermaid
 stateDiagram-v2
     direction TB
@@ -72,10 +72,53 @@ stateDiagram-v2
     class S_WaitRel wait
 ```
 
+## Encoder Button Logic
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    classDef idle fill:#2d3436,stroke:#0984e3,stroke-width:2px,color:#fff
+    classDef proc fill:#2d3436,stroke:#fdcb6e,stroke-width:2px,color:#fff
+    classDef act fill:#2d3436,stroke:#00b894,stroke-width:2px,color:#fff
+
+    [*] --> Idle
+    Idle --> E_Debounce : onPress
+
+    state "Debouncing (60ms)" as E_Debounce
+    E_Debounce --> Idle : Glitch
+    E_Debounce --> E_Poll : Held
+
+    state "Long Press Detection" as E_Poll {
+        direction LR
+        [*] --> PollHeld
+        PollHeld --> Sleep20
+        Sleep20 --> PollHeld : <800ms
+    }
+
+    E_Poll --> E_Mute : Released (short)
+    E_Poll --> E_ProfileSwitch : HeldLong (>800ms)
+
+    state "Mute Toggle" as E_Mute
+    E_Mute --> Idle
+
+    state "Profile Switch" as E_ProfileSwitch
+    E_ProfileSwitch --> E_WaitRel
+
+    state "Wait for Release" as E_WaitRel
+    E_WaitRel --> Idle : Released
+
+    class Idle idle
+    class E_Debounce proc
+    class E_Poll proc
+    class E_Mute act
+    class E_ProfileSwitch act
+    class E_WaitRel proc
+```
+
 ## Timing Constants
 | Parameter | Value | Description |
 | :--- | :--- | :--- |
 | `kDebounceMs` | 60ms | Initial noise filtering |
-| `kLongPressMs` | 800ms | Threshold for Burst mode |
+| `kLongPressMs` | 800ms | Threshold for Burst mode / Profile switch |
 | `kBurstHoldMs` | 2000ms | Duration of the Volume Up hold in Burst mode |
 | `kPollMs` | 20ms | Interval for checking button state during hold |
