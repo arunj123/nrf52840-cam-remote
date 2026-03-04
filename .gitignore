@@ -1,13 +1,3 @@
-# Build directories
-firmware/build/
-firmware/build_host/
 app/build/
-
-# Configuration
-scripts/build.env
 build.env
-
-# Python/Zephyr environment
-.venv/
-__pycache__/
-*.pyc
+firmware/build/

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <zephyr/types.h>
 #include <cstdint>
 
 namespace remote {

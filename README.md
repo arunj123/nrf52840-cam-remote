@@ -193,19 +193,10 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 
 ## 6. Hardware & 3D Modeling (Coming Soon)
 
+The `/hardware` directory is reserved for CAD files. 
 
----
-
-## 7. Unit Testing
-
-The project uses **GoogleTest** for host-based unit testing of the core logic (e.g., `GestureEngine`). These tests run on your development machine (Linux/WSL) and do not require the nRF52 hardware.
-
-### Running Tests
-Use the provided helper script to build and run all tests:
-```bash
-./scripts/test.sh
-```
-
-### Test Directory Structure
-- `firmware/tests/`: Contains the test source code and `CMakeLists.txt`.
-- `firmware/build_host/`: Where the host-based test binaries are built.
+### Integration Strategy:
+1. **Case Design**: A two-part snap-fit or screw-together case (using M2 screws).
+2. **Button Access**: Extenders for pins **P4** and **P5** to allow external triggering while the dongle is protected.
+3. **Mounting**: A standard 1/4" tripod nut mount could be integrated for mounting on camera rigs.
+4. **Material**: Recommended PETG or ABS for durability, though PLA is fine for prototyping.

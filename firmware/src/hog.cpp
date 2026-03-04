@@ -9,7 +9,6 @@
  */
 
 #include "hog.hpp"
-#include "gesture_engine.hpp"
 
 #include <zephyr/types.h>
 #include <zephyr/drivers/gpio.h>
@@ -26,10 +25,6 @@
 #include <array>
 #include <span>
 #include <cstdint>
-
-extern "C" void led_set_trigger_active(bool active);
-extern "C" void buzzer_beep();
-extern "C" void buzzer_long_beep();
 
 namespace remote {
 
@@ -199,6 +194,10 @@ const struct gpio_dt_spec btn_p4 = GPIO_DT_SPEC_GET(DT_NODELABEL(button1), gpios
 const struct gpio_dt_spec btn_p7 = GPIO_DT_SPEC_GET(DT_NODELABEL(button2), gpios);
 const struct device *const qdec_dev = DEVICE_DT_GET(DT_NODELABEL(qdec0));
 
+extern "C" void led_set_trigger_active(bool active);
+extern "C" void buzzer_beep();
+extern "C" void buzzer_long_beep();
+
 // ─── Connection tracking ────────────────────────────────────────
 volatile struct bt_conn *active_conn = nullptr;
 
@@ -216,7 +215,7 @@ static struct gpio_callback btn_p4_cb_data;
 static struct gpio_callback btn_p7_cb_data;
 
 // ─── HID report (only sends if connected) ───────────────────────
-static void send_hid_report(uint8_t key_bits)
+void send_hid_report(uint8_t key_bits)
 {
     struct bt_conn *conn = (struct bt_conn *)active_conn;
     if (!conn) {
@@ -229,46 +228,41 @@ static void send_hid_report(uint8_t key_bits)
 static void encoder_timer_handler(struct k_timer *timer_id);
 K_TIMER_DEFINE(encoder_timer, encoder_timer_handler, NULL);
 
-struct ZephyrHal {
-    static uint64_t get_time_ms() {
-        return k_uptime_get();
-    }
-    static void sleep_ms(int ms) {
-        k_msleep(ms);
-    }
-    static bool is_button_held() {
-        return gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4);
-    }
-    static void send_hid_report(uint8_t key_bits) {
-        ::remote::send_hid_report(key_bits); // Actually just send_hid_report since we are in remote:: anon namespace
-    }
-    static void buzzer_long_beep() {
-        ::buzzer_long_beep();
-    }
-    static void led_set_trigger_active(bool active) {
-        ::led_set_trigger_active(active);
-    }
-};
-
-using Engine = GestureEngine<ZephyrHal>;
-
 static void encoder_timer_handler(struct k_timer *timer_id)
 {
     if (!active_conn || !device_is_ready(qdec_dev)) return;
 
     struct sensor_value val;
     if (sensor_sample_fetch(qdec_dev) == 0 && sensor_channel_get(qdec_dev, SENSOR_CHAN_ROTATION, &val) == 0) {
-        Engine::on_encoder_rotate(val.val1);
+        if (val.val1 > 0) {
+            // Clockwise -> Volume Up
+            send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+            k_msleep(30);
+            send_hid_report(0x00);
+        } else if (val.val1 < 0) {
+            // Counter-Clockwise -> Volume Down
+            send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
+            k_msleep(30);
+            send_hid_report(0x00);
+        }
     }
 }
 
 static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
     if (pins & BIT(btn_p7.pin)) {
-        Engine::on_encoder_button_press();
+        // Direct Mute trigger from ISR for encoder button
+        send_hid_report(static_cast<uint8_t>(HidKey::Mute));
+        k_msleep(50); // basic debounce hold
+        send_hid_report(0x00);
         return;
     }
     k_sem_give(&btn_sem);
+}
+
+bool is_button_held()
+{
+    return gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4);
 }
 
 // ─── Button thread (sleeping) ───────────────────────────────────
@@ -282,15 +276,48 @@ void button_thread(void *, void *, void *)
 
     while (true) {
         // Go to sleep (System ON idle) until a button interrupt wakes us up
-        printk("Zzz... Sleeping\n");
         k_sem_take(&btn_sem, K_FOREVER);
-        printk("Woke up!\n");
         
-        Engine::on_main_button_wake();
+        bool now = is_button_held();
 
-        // Clear any semaphore gives that happened while we were busy
-        k_sem_reset(&btn_sem);
-        printk("BTN: Ready\n");
+        if (now) {
+            // Rising edge — debounce
+            k_msleep(kDebounceMs);
+            if (!is_button_held()) continue;
+
+            printk("BTN: Press\n");
+
+            // Single click
+            led_set_trigger_active(true);
+            send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+            k_msleep(100);
+            send_hid_report(0x00);
+            led_set_trigger_active(false);
+
+            // Check for long press (poll while held)
+            int64_t t0 = k_uptime_get();
+            bool burst = false;
+            while (is_button_held()) {
+                k_msleep(kPollMs);
+                if ((k_uptime_get() - t0) >= kLongPressMs) { burst = true; break; }
+            }
+
+            if (burst) {
+                printk("BTN: Burst\n");
+                buzzer_long_beep();
+                led_set_trigger_active(true);
+                send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+                k_msleep(kBurstHoldMs);
+                send_hid_report(0x00);
+                led_set_trigger_active(false);
+                while (is_button_held()) k_msleep(kPollMs);
+            }
+
+            k_msleep(kDebounceMs);
+            // Clear any semaphore gives that happened while we were busy
+            k_sem_reset(&btn_sem);
+            printk("BTN: Ready\n");
+        }
     }
 }
 
