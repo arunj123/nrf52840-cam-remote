@@ -5,7 +5,7 @@ This diagram illustrates the state transitions and timing logic for the `Gesture
 ## Logic Diagram
 ```mermaid
 stateDiagram-v2
-    direction LR
+    direction TB
 
     %% Styles
     classDef idle fill:#2d3436,stroke:#0984e3,stroke-width:2px,color:#fff
