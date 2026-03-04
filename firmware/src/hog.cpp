@@ -20,7 +20,6 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
-#include <zephyr/drivers/sensor.h>
 
 #include <array>
 #include <span>
@@ -191,8 +190,6 @@ namespace {
 
 const struct gpio_dt_spec btn_p5 = GPIO_DT_SPEC_GET(DT_NODELABEL(button0), gpios);
 const struct gpio_dt_spec btn_p4 = GPIO_DT_SPEC_GET(DT_NODELABEL(button1), gpios);
-const struct gpio_dt_spec btn_p7 = GPIO_DT_SPEC_GET(DT_NODELABEL(button2), gpios);
-const struct device *const qdec_dev = DEVICE_DT_GET(DT_NODELABEL(qdec0));
 
 extern "C" void led_set_trigger_active(bool active);
 extern "C" void buzzer_beep();
@@ -206,58 +203,29 @@ constexpr int kPollMs = 20;
 constexpr int kDebounceMs = 60;
 constexpr int kLongPressMs = 800;
 constexpr int kBurstHoldMs = 2000;
-constexpr int kEncoderPollMs = 50;
 
 // ─── Button synchronization ─────────────────────────────────────
 K_SEM_DEFINE(btn_sem, 0, 1);
 static struct gpio_callback btn_p5_cb_data;
 static struct gpio_callback btn_p4_cb_data;
-static struct gpio_callback btn_p7_cb_data;
+
+static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+    k_sem_give(&btn_sem);
+}
 
 // ─── HID report (only sends if connected) ───────────────────────
 void send_hid_report(uint8_t key_bits)
 {
     struct bt_conn *conn = (struct bt_conn *)active_conn;
     if (!conn) {
+        printk("HID: no connection, skipping\n");
         return;
     }
-    bt_gatt_notify(conn, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
-}
-
-// ─── Encoder Polling Timer ──────────────────────────────────────
-static void encoder_timer_handler(struct k_timer *timer_id);
-K_TIMER_DEFINE(encoder_timer, encoder_timer_handler, NULL);
-
-static void encoder_timer_handler(struct k_timer *timer_id)
-{
-    if (!active_conn || !device_is_ready(qdec_dev)) return;
-
-    struct sensor_value val;
-    if (sensor_sample_fetch(qdec_dev) == 0 && sensor_channel_get(qdec_dev, SENSOR_CHAN_ROTATION, &val) == 0) {
-        if (val.val1 > 0) {
-            // Clockwise -> Volume Up
-            send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-            k_msleep(30);
-            send_hid_report(0x00);
-        } else if (val.val1 < 0) {
-            // Counter-Clockwise -> Volume Down
-            send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
-            k_msleep(30);
-            send_hid_report(0x00);
-        }
+    int err = bt_gatt_notify(conn, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
+    if (err) {
+        printk("HID: notify err %d\n", err);
     }
-}
-
-static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-    if (pins & BIT(btn_p7.pin)) {
-        // Direct Mute trigger from ISR for encoder button
-        send_hid_report(static_cast<uint8_t>(HidKey::Mute));
-        k_msleep(50); // basic debounce hold
-        send_hid_report(0x00);
-        return;
-    }
-    k_sem_give(&btn_sem);
 }
 
 bool is_button_held()
@@ -276,7 +244,9 @@ void button_thread(void *, void *, void *)
 
     while (true) {
         // Go to sleep (System ON idle) until a button interrupt wakes us up
+        printk("Zzz... Sleeping\n");
         k_sem_take(&btn_sem, K_FOREVER);
+        printk("Woke up!\n");
         
         bool now = is_button_held();
 
@@ -329,7 +299,6 @@ extern "C" void hid_set_conn(struct bt_conn *conn)
 {
     active_conn = bt_conn_ref(conn);
     printk("HID: conn set\n");
-    k_timer_start(&encoder_timer, K_MSEC(kEncoderPollMs), K_MSEC(kEncoderPollMs));
 }
 
 extern "C" void hid_clear_conn()
@@ -339,7 +308,6 @@ extern "C" void hid_clear_conn()
         active_conn = nullptr;
     }
     printk("HID: conn cleared\n");
-    k_timer_stop(&encoder_timer);
 }
 
 // ─── Public API ──────────────────────────────────────────────────
@@ -351,10 +319,6 @@ void HidService::init()
                     button_thread, nullptr, nullptr, nullptr,
                     7, 0, K_NO_WAIT);
     k_thread_name_set(&btn_thread_data, "btn");
-
-    if (!device_is_ready(qdec_dev)) {
-        printk("QDEC sensor not ready\n");
-    }
 }
 
 void HidService::send_key(HidKey key)
@@ -378,20 +342,15 @@ void HidService::run_button_loop()
 {
     gpio_pin_configure_dt(&btn_p5, GPIO_INPUT | btn_p5.dt_flags);
     gpio_pin_configure_dt(&btn_p4, GPIO_INPUT | btn_p4.dt_flags);
-    gpio_pin_configure_dt(&btn_p7, GPIO_INPUT | btn_p7.dt_flags);
 
     gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_BOTH);
     gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_BOTH);
-    gpio_pin_interrupt_configure_dt(&btn_p7, GPIO_INT_EDGE_TO_ACTIVE);
 
     gpio_init_callback(&btn_p5_cb_data, button_pressed_isr, BIT(btn_p5.pin));
     gpio_add_callback_dt(&btn_p5, &btn_p5_cb_data);
 
     gpio_init_callback(&btn_p4_cb_data, button_pressed_isr, BIT(btn_p4.pin));
     gpio_add_callback_dt(&btn_p4, &btn_p4_cb_data);
-
-    gpio_init_callback(&btn_p7_cb_data, button_pressed_isr, BIT(btn_p7.pin));
-    gpio_add_callback_dt(&btn_p7, &btn_p7_cb_data);
 
     printk("HID Ready: Press=Photo, Hold=Burst (interrupt-driven)\n");
     k_sleep(K_FOREVER);

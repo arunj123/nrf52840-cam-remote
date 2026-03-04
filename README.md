@@ -41,13 +41,10 @@ For volume control, a rotary encoder (e.g., EC11) can be connected to the follow
 > **Note**: To maximize battery life, LEDs are automatically disabled during idle sleep while connected or advertising. A **passive ceramic piezo buzzer** is used for audio feedback (connected between P2 and GND, driven by 4kHz PWM).
 
 ### Click Modes
-| Gesture | Device | Action | Buzzer Feedback |
-|---------|--------|--------|------------------|
-| **Press** | Main Button | Photo / Video Start-Stop (Volume Up) | 1 short beep |
-| **Hold >0.8s** | Main Button | Burst Mode (hold Volume Up) | 1 long beep |
-| **Rotate C/W** | Encoder | Volume Up | None |
-| **Rotate CC/W** | Encoder | Volume Down | None |
-| **Press** | Encoder | Mute Toggle | None |
+| Gesture | Action | Buzzer Feedback |
+|---------|--------|------------------|
+| **Press** | Photo / Video Start-Stop (Volume Up) | 1 short beep |
+| **Hold >0.8s** | Burst Mode (hold Volume Up 2s) | 1 long beep |
 
 > **iPhone**: On iPhone 11+, holding Volume Up triggers QuickTake by default. To enable burst: **Settings > Camera > Use Volume Up for Burst**.
 

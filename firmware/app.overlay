@@ -9,8 +9,6 @@
  * This overlay:
  *   - Overrides sw0/button0 to P0.05 (external trigger)
  *   - Adds button1 on P0.04 (secondary trigger)
- *   - Adds button2 on P0.07 (Encoder Mute toggle)
- *   - Adds qdec0 on P0.03 (Phase A) and P0.06 (Phase B)
  *   - Uses pwm1 (NOT pwm0) for the buzzer on P0.02
  *   - Disables UART0 to free P0.05 (used as RTS by default)
  */
@@ -22,7 +20,6 @@
 	aliases {
 		sw0 = &button0;
 		buzzer = &pwm_buzzer0;
-		qdec0 = &qdec0;
 	};
 
 	pwm_buzzers {
@@ -45,11 +42,6 @@
 			label = "P4 Trigger";
 			zephyr,code = <INPUT_KEY_1>;
 		};
-		button2: button_2 {
-			gpios = <&gpio0 7 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
-			label = "P7 Encoder Mute";
-			zephyr,code = <INPUT_KEY_2>;
-		};
 	};
 };
 
@@ -66,16 +58,6 @@
 		zephyr,input-positive = <NRF_SAADC_VDD>;
 		zephyr,resolution = <10>;
 	};
-};
-
-/* Provide Hardware QDEC for Rotary Encoder */
-&qdec0 {
-	status = "okay";
-	pinctrl-0 = <&qdec_default>;
-	pinctrl-1 = <&qdec_sleep>;
-	pinctrl-names = "default", "sleep";
-	steps = <24>;
-	led-pre = <0>; /* Required by binding, not used in our mechanical encoder config */
 };
 
 /* Override UART0 pinctrl to remove P0.05 (RTS) — we use it as a trigger button */
@@ -119,23 +101,6 @@
 	pwm1_sleep: pwm1_sleep {
 		group1 {
 			psels = <NRF_PSEL(PWM_OUT0, 0, 2)>;
-			low-power-enable;
-		};
-	};
-
-	qdec_default: qdec_default {
-		group1 {
-			psels = <NRF_PSEL(QDEC_A, 0, 3)>,
-				<NRF_PSEL(QDEC_B, 0, 6)>;
-			bias-pull-up;
-		};
-	};
-
-	qdec_sleep: qdec_sleep {
-		group1 {
-			psels = <NRF_PSEL(QDEC_A, 0, 3)>,
-				<NRF_PSEL(QDEC_B, 0, 6)>;
-			bias-pull-up;
 			low-power-enable;
 		};
 	};
