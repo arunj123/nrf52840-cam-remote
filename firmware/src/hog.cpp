@@ -30,6 +30,7 @@
 extern "C" void led_set_trigger_active(bool active);
 extern "C" void buzzer_beep();
 extern "C" void buzzer_long_beep();
+extern "C" void on_profile_switch_request();
 
 namespace remote {
 
@@ -211,6 +212,7 @@ constexpr int kEncoderPollMs = 50;
 
 // ─── Button synchronization ─────────────────────────────────────
 K_SEM_DEFINE(btn_sem, 0, 1);
+K_SEM_DEFINE(enc_btn_sem, 0, 1);
 static struct gpio_callback btn_p5_cb_data;
 static struct gpio_callback btn_p4_cb_data;
 static struct gpio_callback btn_p7_cb_data;
@@ -239,14 +241,20 @@ struct ZephyrHal {
     static bool is_button_held() {
         return gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4);
     }
+    static bool is_encoder_button_held() {
+        return gpio_pin_get_dt(&btn_p7);
+    }
     static void send_hid_report(uint8_t key_bits) {
-        ::remote::send_hid_report(key_bits); // Actually just send_hid_report since we are in remote:: anon namespace
+        ::remote::send_hid_report(key_bits);
     }
     static void buzzer_long_beep() {
         ::buzzer_long_beep();
     }
     static void led_set_trigger_active(bool active) {
         ::led_set_trigger_active(active);
+    }
+    static void on_profile_switch() {
+        ::on_profile_switch_request();
     }
 };
 
@@ -265,7 +273,7 @@ static void encoder_timer_handler(struct k_timer *timer_id)
 static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
     if (pins & BIT(btn_p7.pin)) {
-        Engine::on_encoder_button_press();
+        k_sem_give(&enc_btn_sem);
         return;
     }
     k_sem_give(&btn_sem);
@@ -281,16 +289,30 @@ void button_thread(void *, void *, void *)
     printk("Button thread started (interrupt-driven)\n");
 
     while (true) {
-        // Go to sleep (System ON idle) until a button interrupt wakes us up
         printk("Zzz... Sleeping\n");
         k_sem_take(&btn_sem, K_FOREVER);
         printk("Woke up!\n");
         
         Engine::on_main_button_wake();
 
-        // Clear any semaphore gives that happened while we were busy
         k_sem_reset(&btn_sem);
         printk("BTN: Ready\n");
+    }
+}
+
+// ─── Encoder button thread (long-press detection) ───────────────
+
+K_THREAD_STACK_DEFINE(enc_btn_stack, 1024);
+struct k_thread enc_btn_thread_data;
+
+void encoder_button_thread(void *, void *, void *)
+{
+    printk("Encoder button thread started\n");
+
+    while (true) {
+        k_sem_take(&enc_btn_sem, K_FOREVER);
+        Engine::on_encoder_button_press();
+        k_sem_reset(&enc_btn_sem);
     }
 }
 
@@ -325,6 +347,12 @@ void HidService::init()
                     7, 0, K_NO_WAIT);
     k_thread_name_set(&btn_thread_data, "btn");
 
+    k_thread_create(&enc_btn_thread_data, enc_btn_stack,
+                    K_THREAD_STACK_SIZEOF(enc_btn_stack),
+                    encoder_button_thread, nullptr, nullptr, nullptr,
+                    7, 0, K_NO_WAIT);
+    k_thread_name_set(&enc_btn_thread_data, "enc_btn");
+
     if (!device_is_ready(qdec_dev)) {
         printk("QDEC sensor not ready\n");
     }
@@ -355,7 +383,7 @@ void HidService::run_button_loop()
 
     gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_BOTH);
     gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_BOTH);
-    gpio_pin_interrupt_configure_dt(&btn_p7, GPIO_INT_EDGE_TO_ACTIVE);
+    gpio_pin_interrupt_configure_dt(&btn_p7, GPIO_INT_EDGE_BOTH);
 
     gpio_init_callback(&btn_p5_cb_data, button_pressed_isr, BIT(btn_p5.pin));
     gpio_add_callback_dt(&btn_p5, &btn_p5_cb_data);

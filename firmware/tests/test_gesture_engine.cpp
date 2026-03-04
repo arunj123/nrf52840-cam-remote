@@ -9,17 +9,23 @@ struct MockState {
     uint64_t time_ms = 0;
     bool button_held = false;
     uint64_t release_time_ms = 0;
+    bool encoder_button_held = false;
+    uint64_t encoder_release_time_ms = 0;
     std::vector<uint8_t> sent_reports;
     int beep_count = 0;
     bool led_active = false;
+    int profile_switch_count = 0;
 
     void reset() {
         time_ms = 0;
         button_held = false;
         release_time_ms = 0;
+        encoder_button_held = false;
+        encoder_release_time_ms = 0;
         sent_reports.clear();
         beep_count = 0;
         led_active = false;
+        profile_switch_count = 0;
     }
 };
 
@@ -32,11 +38,16 @@ struct MockHal {
         if (state.button_held && state.time_ms >= state.release_time_ms) {
             state.button_held = false;
         }
+        if (state.encoder_button_held && state.time_ms >= state.encoder_release_time_ms) {
+            state.encoder_button_held = false;
+        }
     }
     static bool is_button_held() { return state.button_held; }
+    static bool is_encoder_button_held() { return state.encoder_button_held; }
     static void send_hid_report(uint8_t key_bits) { state.sent_reports.push_back(key_bits); }
     static void buzzer_long_beep() { state.beep_count++; }
     static void led_set_trigger_active(bool active) { state.led_active = active; }
+    static void on_profile_switch() { state.profile_switch_count++; }
 };
 
 using TestEngine = remote::GestureEngine<MockHal>;
@@ -105,11 +116,33 @@ TEST_F(GestureEngineTest, EncoderRotateCounterClockwise) {
     EXPECT_EQ(state.sent_reports[1], 0x00);
 }
 
-TEST_F(GestureEngineTest, EncoderMuteButton) {
+TEST_F(GestureEngineTest, EncoderShortPressSendsMute) {
+    // Short press: held for 100ms (< 800ms long press threshold)
+    state.encoder_button_held = true;
+    state.encoder_release_time_ms = state.time_ms + 100;
     TestEngine::on_encoder_button_press();
     ASSERT_EQ(state.sent_reports.size(), 2);
     EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::Mute));
     EXPECT_EQ(state.sent_reports[1], 0x00);
+    EXPECT_EQ(state.profile_switch_count, 0);
+}
+
+TEST_F(GestureEngineTest, EncoderLongPressTriggersProfileSwitch) {
+    // Long press: held for 1000ms (> 800ms)
+    state.encoder_button_held = true;
+    state.encoder_release_time_ms = state.time_ms + 1000;
+    TestEngine::on_encoder_button_press();
+    EXPECT_TRUE(state.sent_reports.empty()); // no mute sent
+    EXPECT_EQ(state.profile_switch_count, 1);
+}
+
+TEST_F(GestureEngineTest, EncoderGlitchIsIgnored) {
+    // Released before debounce completes
+    state.encoder_button_held = true;
+    state.encoder_release_time_ms = state.time_ms + 20; // < 60ms debounce
+    TestEngine::on_encoder_button_press();
+    EXPECT_TRUE(state.sent_reports.empty());
+    EXPECT_EQ(state.profile_switch_count, 0);
 }
 
 // ─── Edge cases ─────────────────────────────────────────────────

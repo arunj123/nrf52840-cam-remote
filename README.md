@@ -48,6 +48,7 @@ For volume control, a rotary encoder (e.g., EC11) can be connected to the follow
 | **Rotate C/W** | Encoder | Volume Up | None |
 | **Rotate CC/W** | Encoder | Volume Down | None |
 | **Press** | Encoder | Mute Toggle | None |
+| **Hold >0.8s** | Encoder | Cycle Profile Slot (1→2→3→1) | N beeps |
 
 > **iPhone**: On iPhone 11+, holding Volume Up triggers QuickTake by default. To enable burst: **Settings > Camera > Use Volume Up for Burst**.
 
@@ -207,6 +208,8 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 - **Security**: "Just Works" encryption (BT_SECURITY_L2). No passkey required.
 - **Advertising Watchdog**: Background worker ensures advertising automatically restarts if the BLE stack hits an error or if the device disconnects.
 - **Persistent Bonding**: Pairing info is stored in NVS, allowing auto-reconnection after power cycles.
+- **Multi-Device Profiles**: Supports bonding with up to 3 devices. One active connection at a time; cycle with encoder button long-press.
+- **Provisioning Service**: Custom GATT service skeleton (vendor UUID) for future button-function programming via companion app.
 
 ---
 

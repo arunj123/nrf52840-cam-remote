@@ -33,6 +33,16 @@ target_link_libraries(test_battery_conversion
   GTest::gtest_main
 )
 
+# ─── ProfileManager Tests ────────────────────────────────────────
+add_executable(test_profile_manager
+  test_profile_manager.cpp
+)
+target_include_directories(test_profile_manager PRIVATE ../src)
+target_link_libraries(test_profile_manager
+  GTest::gtest_main
+)
+
 include(GoogleTest)
 gtest_discover_tests(test_gesture_engine)
 gtest_discover_tests(test_battery_conversion)
+gtest_discover_tests(test_profile_manager)
