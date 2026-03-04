@@ -68,13 +68,21 @@ The firmware reports battery level to your phone via BLE Battery Service (BAS).
 ## 2. Software & Development
 
 ### Architecture (Modern C++ Refactor)
-The project is built using **Modern C++20** for improved modularity and safety.
+The project is built using **Modern C++23** for improved modularity and safety.
 - **OS**: Zephyr RTOS v4.x
-- **Standard**: C++20 (using `std::span`, `std::array`, and structured classes)
+- **Standard**: C++23 (using `std::span`, `std::array`, and structured classes)
 - **Logic**: Encapsulated in `remote::HidService`, `remote::BluetoothManager`, `remote::LedController`, `remote::BuzzerController`, and `remote::BatteryMonitor`.
+- **Gesture Logic**: Detailed state transitions and timing are documented in [docs/gesture_logic.md](docs/gesture_logic.md).
 - **Button Engine**: Interrupt-driven thread with automated power-saving sleep. Deadlock-proof.
 - **Profile**: Consumer Control (Media Remote) via HOGP.
 - **Pairing**: "Just Works" (no PIN required, encrypted link with bonding).
+
+### Developer Rules & Requirements
+To maintain consistency and high code quality, this project uses automated agent workflows:
+- **[Functional Requirements](.agent/workflows/functional-requirements.md)**: Defines the project scope, feature set, and non-functional constraints.
+- **[Technical Standards & Rules](.agent/workflows/technical-standards.md)**: Defines coding standards (C++23), TDD requirements, and documentation rules.
+
+**Rule**: These documents **MUST** be updated whenever functional or technical changes are made.
 
 ### Directory Structure
 ```text
@@ -163,7 +171,18 @@ $OPENOCD_DIR = "C:/Users/<your-user>/.pico-sdk/openocd/0.12.0+dev"
   -c "init; halt; nrf5 mass_erase; reset halt; flash write_image C:/nrf_recovery/app.hex; reset; exit"
 ```
 
-### Step 3: Pair with Phone
+### Step 3: Monitor Logs from Windows
+To view debug output (printk) from the device, use `pyserial`'s miniterm in PowerShell:
+
+1. **Identify COM Port**: Plug in your serial adapter (connected to pins P0.20/P0.19) and find the COM port in Device Manager.
+2. **Run Monitor**:
+```powershell
+pip install pyserial
+python -m serial.tools.miniterm COM<X> 115200
+```
+> **Note**: Replace `COM<X>` with your actual port (e.g., `COM3`). Exit with `Ctrl+]`.
+
+### Step 4: Pair with Phone
 1. On Android: **Settings → Bluetooth → Scan**.
 2. Pair with **"Cam Remote Pro"** (no PIN required).
 3. Open the Camera app and short **P4** or **P5** to GND to take a photo.

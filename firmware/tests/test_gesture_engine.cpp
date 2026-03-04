@@ -111,3 +111,36 @@ TEST_F(GestureEngineTest, EncoderMuteButton) {
     EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::Mute));
     EXPECT_EQ(state.sent_reports[1], 0x00);
 }
+
+// ─── Edge cases ─────────────────────────────────────────────────
+
+TEST_F(GestureEngineTest, EncoderZeroStepsDoesNothing) {
+    TestEngine::on_encoder_rotate(0);
+    EXPECT_TRUE(state.sent_reports.empty());
+}
+
+TEST_F(GestureEngineTest, ButtonNotHeldOnWakeIsIgnored) {
+    // Button released before we even check (falling edge only)
+    state.button_held = false;
+    TestEngine::on_main_button_wake();
+    EXPECT_TRUE(state.sent_reports.empty());
+    EXPECT_EQ(state.beep_count, 0);
+}
+
+TEST_F(GestureEngineTest, LedInactiveAfterSingleClick) {
+    simulate_main_button_press(100);
+    EXPECT_FALSE(state.led_active);
+}
+
+TEST_F(GestureEngineTest, LedInactiveAfterBurst) {
+    simulate_main_button_press(1000);
+    EXPECT_FALSE(state.led_active);
+}
+
+TEST_F(GestureEngineTest, MultipleEncoderStepsPositive) {
+    // Steps > 1 still sends a single VolumeUp (per the current API)
+    TestEngine::on_encoder_rotate(5);
+    ASSERT_EQ(state.sent_reports.size(), 2);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::VolumeUp));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+}

@@ -7,6 +7,7 @@
  */
 
 #include "battery.hpp"
+#include "battery_conversion.hpp"
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -20,7 +21,6 @@ namespace remote {
 
 // ─── ADC Configuration ──────────────────────────────────────────
 
-static constexpr uint16_t kAdcResolution = 10;
 static const struct device *adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc));
 static int16_t adc_buf;
 
@@ -32,27 +32,6 @@ static struct adc_sequence sequence = {
     .buffer_size = sizeof(adc_buf),
     .resolution = kAdcResolution,
 };
-
-// ─── Voltage to Percentage mapping ──────────────────────────────
-
-static uint16_t raw_to_millivolts(int16_t raw)
-{
-    if (raw < 0) raw = 0;
-    return static_cast<uint16_t>((static_cast<uint32_t>(raw) * 3600) / (1 << kAdcResolution));
-}
-
-static uint8_t millivolts_to_percent(uint16_t mv)
-{
-    constexpr uint16_t kMinMv = 3000;
-    constexpr uint16_t kMaxMv = 4200;
-
-    if (mv <= kMinMv) return 0;
-    if (mv >= kMaxMv) return 100;
-
-    return static_cast<uint8_t>(
-        (static_cast<uint32_t>(mv - kMinMv) * 100) / (kMaxMv - kMinMv)
-    );
-}
 
 // ─── Periodic update timer ──────────────────────────────────────
 

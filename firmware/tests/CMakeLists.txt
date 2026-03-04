@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(nrf_control_tests)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
@@ -15,6 +15,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 
+# ─── GestureEngine Tests ─────────────────────────────────────────
 add_executable(test_gesture_engine
   test_gesture_engine.cpp
 )
@@ -23,5 +24,15 @@ target_link_libraries(test_gesture_engine
   GTest::gtest_main
 )
 
+# ─── Battery Conversion Tests ────────────────────────────────────
+add_executable(test_battery_conversion
+  test_battery_conversion.cpp
+)
+target_include_directories(test_battery_conversion PRIVATE ../src)
+target_link_libraries(test_battery_conversion
+  GTest::gtest_main
+)
+
 include(GoogleTest)
 gtest_discover_tests(test_gesture_engine)
+gtest_discover_tests(test_battery_conversion)

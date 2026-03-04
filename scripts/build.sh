@@ -75,4 +75,8 @@ if $DO_FLASH; then
     echo "    -s \"${OPENOCD_DIR}/scripts\" \`"
     echo "    -f \"C:/nrf_recovery/nrf52_stlink.cfg\" \`"
     echo '    -c "init; halt; nrf5 mass_erase; reset halt; flash write_image C:/nrf_recovery/app.hex; reset; exit"'
+    echo ""
+    echo "Monitor Logs from PowerShell (requires python):"
+    echo "  pip install pyserial"
+    echo "  python -m serial.tools.miniterm COM<X> 115200"
 fi
