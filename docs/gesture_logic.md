@@ -3,7 +3,7 @@
 This diagram illustrates the state transitions and timing logic for the `GestureEngine` (main button handling).
 
 ```mermaid
-state_chain-diagram
+stateDiagram-v2
     [*] --> Idle
     
     state Idle {
