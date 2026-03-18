@@ -127,8 +127,9 @@ cp scripts/build.env.example scripts/build.env
 # 4. Build the firmware (MDK Dongle by default)
 ./scripts/build.sh
 
-# 5. Build for Pro Micro nRF52840
+# 5. Build for Pro Micro nRF52840 (generates UF2)
 ./scripts/build.sh --board promicro_nrf52840
+# Result: firmware/build_promicro_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2
 
 # 6. Build + copy hex to Windows for flashing
 ./scripts/build.sh --flash
@@ -204,12 +205,19 @@ python -m serial.tools.miniterm COM<X> 115200
 ```
 > **Note**: Replace `COM<X>` with your actual port (e.g., `COM3`). Exit with `Ctrl+]`.
 
-### Step 4: Pair with Phone
-1. On Android: **Settings → Bluetooth → Scan**.
-2. Pair with **"Cam Remote Pro"** (no PIN required).
-3. Open the Camera app and short **P4** or **P5** to GND to take a photo.
+### Step 4: Pro Micro Flashing (UF2)
+If using the **Pro Micro nRF52840**:
+1. **Enter Bootloader**: Quickly **double-tap** the Reset button (or bridge RST to GND twice).
+2. **Mount**: A new drive named `UF2BOOT` will appear on your computer.
+3. **Flash**: Drag and drop the `zephyr.uf2` file onto the `UF2BOOT` drive.
+4. The board will automatically reboot with the new firmware.
 
-> **Note**: If you re-flash, you must **forget/unpair** the device on your phone first, then re-pair. The mass erase clears the bonding info on the dongle.
+### Step 5: Pair with Phone
+1. On Android/iOS: **Settings → Bluetooth → Scan**.
+2. Pair with **"Cam Remote Pro"**.
+3. Open the Camera app and test the trigger.
+
+> **Note**: If you re-flash via SWD (ST-Link), you must **forget/unpair** the device on your phone first. UF2 flashing usually preserves bonding if the bootloader supports it, but its safer to re-pair if connection fails.
 
 ---
 
