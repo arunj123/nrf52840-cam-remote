@@ -15,9 +15,8 @@ if [[ -f "${SCRIPT_DIR}/build.env" ]]; then
     source "${SCRIPT_DIR}/build.env"
 fi
 
-APP_DIR="$(dirname "${SCRIPT_DIR}")/firmware"
-BUILD_DIR="${APP_DIR}/build"
 BOARD="nrf52840_mdk"
+APP_DIR="$(dirname "${SCRIPT_DIR}")/firmware"
 
 # Defaults to a sibling directory of this project root. Override with env vars.
 ZEPHYR_WORKSPACE="${ZEPHYR_WORKSPACE:-$(dirname "$(dirname "${SCRIPT_DIR}")")/zephyrproject}"
@@ -26,13 +25,17 @@ VENV_DIR="${ZEPHYR_WORKSPACE}/.venv"
 PRISTINE=""
 DO_FLASH=false
 
-for arg in "$@"; do
-    case "$arg" in
-        --pristine) PRISTINE="-p" ;;
-        --flash)    DO_FLASH=true ;;
-        *)          echo "Unknown argument: $arg"; exit 1 ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --pristine) PRISTINE="-p"; shift ;;
+        --flash)    DO_FLASH=true; shift ;;
+        --board)    BOARD="$2"; shift 2 ;;
+        --board=*)  BOARD="${1#*=}"; shift ;;
+        *)          echo "Unknown argument: $1"; exit 1 ;;
     esac
 done
+
+BUILD_DIR="${APP_DIR}/build_${BOARD}"
 
 # Activate the Zephyr venv
 if [[ ! -d "${VENV_DIR}" ]]; then

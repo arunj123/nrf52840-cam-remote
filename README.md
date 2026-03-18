@@ -4,9 +4,23 @@ A Bluetooth Low Energy HID Camera Remote using the MakerDiary nRF52840 MDK USB D
 
 ## 1. Hardware Setup
 
-### The Device
-- **Board**: [MakerDiary nRF52840 MDK USB Dongle](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/)
-- **Core**: Nordic nRF52840 (Cortex-M4F, Bluetooth 5.0)
+### Supported Boards
+- **MakerDiary nRF52840 MDK USB Dongle**: [MakerDiary Wiki](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/) (Default target)
+- **Pro Micro nRF52840**: A Pro Micro-compatible nRF52840 board (e.g., Nice!Nano, Bluemicro, or custom).
+
+### Pin Mappings
+
+| Feature | MDK Dongle (P0.xx) | Pro Micro (Dxx / P0.xx) |
+| :--- | :--- | :--- |
+| **Trigger 1** | `P0.05` | `D5` (P0.20) |
+| **Trigger 2** | `P0.04` | `D4` (P0.17) |
+| **Mute Toggle** | `P0.07` | `D7` (P0.24) |
+| **Encoder A** | `P0.03` | `D2` (P0.10) |
+| **Encoder B** | `P0.06` | `D3` (P1.11) |
+| **Buzzer** | `P0.02` | `D6` (P0.22) |
+| **Red LED** | `P0.23` | `P0.15` |
+| **Green LED** | `P0.22` | *(None)* |
+| **Blue LED** | `P0.24` | *(None)* |
 
 ### Wiring for Flashing (ST-Link V2)
 To recover or flash the device manually (if the USB bootloader is missing or locked), connect an **ST-Link V2** to the 4-pin header:
@@ -110,10 +124,13 @@ cp scripts/build.env.example scripts/build.env
 # 3. Bootstrap the Zephyr toolchain (one-time setup, ~10 minutes)
 ./scripts/setup_env.sh
 
-# 4. Build the firmware
+# 4. Build the firmware (MDK Dongle by default)
 ./scripts/build.sh
 
-# 5. Build + copy hex to Windows for flashing
+# 5. Build for Pro Micro nRF52840
+./scripts/build.sh --board promicro_nrf52840
+
+# 6. Build + copy hex to Windows for flashing
 ./scripts/build.sh --flash
 ```
 
@@ -123,7 +140,8 @@ cp scripts/build.env.example scripts/build.env
 |--------|---------|
 | `scripts/setup_env.sh` | Installs system deps, creates Python venv, initializes Zephyr workspace, downloads SDK 0.17.0 |
 | `scripts/setup_env.sh --ci` | Same as above but quieter output for CI |
-| `scripts/build.sh` | Activates venv and runs `west build` for `nrf52840_mdk` |
+| `scripts/build.sh` | Activates venv and runs `west build` |
+| `scripts/build.sh --board <name>` | Select board target (`nrf52840_mdk` or `promicro_nrf52840`) |
 | `scripts/build.sh --pristine` | Clean rebuild (wipes build directory first) |
 | `scripts/build.sh --flash` | Builds and copies `zephyr.hex` to Windows flash directory |
 
@@ -147,7 +165,10 @@ If you prefer not to use the wrapper scripts:
 ```bash
 source <ZEPHYR_WORKSPACE>/.venv/bin/activate
 cd <ZEPHYR_WORKSPACE>
-west build -b nrf52840_mdk -d <project>/firmware/build <project>/firmware
+# For MDK Dongle
+west build -b nrf52840_mdk -d <project>/firmware/build_nrf52840_mdk <project>/firmware
+# For Pro Micro
+west build -b promicro_nrf52840 -d <project>/firmware/build_promicro_nrf52840 <project>/firmware
 ```
 
 ---
