@@ -35,7 +35,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-BUILD_DIR="${APP_DIR}/build_${BOARD}"
+# Auto-append UF2 qualifier for Pro Micro if not specified
+if [[ "${BOARD}" == "promicro_nrf52840" ]]; then
+    BOARD="promicro_nrf52840/nrf52840/uf2"
+fi
+
+# Replace forward slashes in BOARD name with underscores for the build directory name
+SAFE_BOARD_NAME=$(echo "${BOARD}" | tr '/' '_')
+BUILD_DIR="${APP_DIR}/build_${SAFE_BOARD_NAME}"
 
 # Activate the Zephyr venv
 if [[ ! -d "${VENV_DIR}" ]]; then
