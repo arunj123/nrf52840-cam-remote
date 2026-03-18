@@ -129,6 +129,7 @@ extern "C" void buzzer_countdown_beep() {
 // Connection tracking bridge (defined in hog.cpp)
 extern "C" void hid_set_conn(struct bt_conn *conn);
 extern "C" void hid_clear_conn();
+extern "C" void hid_disconnect();
 
 namespace remote {
 
@@ -267,7 +268,7 @@ public:
                 .id = BT_ID_DEFAULT,
                 .sid = 0,
                 .secondary_max_skip = 0,
-                .options = BT_LE_ADV_OPT_CONN,
+                .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY | BT_LE_ADV_OPT_DIR_ADDR_RPA,
                 .interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
                 .interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
                 .peer = &target,
@@ -379,9 +380,11 @@ private:
 
     static void pairing_complete(struct bt_conn *conn, bool bonded) {
         if (bonded) {
-            const bt_addr_le_t *addr = bt_conn_get_dst(conn);
+            struct bt_conn_info info;
+            bt_conn_get_info(conn, &info);
+            const bt_addr_le_t *addr = info.le.dst;
             profile_mgr.update_active_addr(reinterpret_cast<const uint8_t*>(addr));
-            printk("REL: Bond established, address saved to slot %u\n", profile_mgr.active_slot());
+            printk("REL: Bond established, identity address saved to slot %u\n", profile_mgr.active_slot());
         }
     }
 
@@ -461,10 +464,9 @@ extern "C" void on_profile_switch_request() {
     }
 
     // Disconnect current connection so we can re-advertise to the new slot's peer
-    hid_clear_conn();
+    hid_disconnect();
     
-    // Force immediate re-advertising
-    BluetoothManager::start_advertising();
+    // Do not force start_advertising() here since it will be triggered by disconnected() callback
 }
 
 } // namespace remote

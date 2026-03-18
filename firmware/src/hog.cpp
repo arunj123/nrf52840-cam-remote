@@ -327,6 +327,14 @@ extern "C" void hid_set_conn(struct bt_conn *conn)
     k_timer_start(&encoder_timer, K_MSEC(kEncoderPollMs), K_MSEC(kEncoderPollMs));
 }
 
+extern "C" void hid_disconnect()
+{
+    if (active_conn) {
+        printk("HID: disconnecting...\n");
+        bt_conn_disconnect((struct bt_conn *)active_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+    }
+}
+
 extern "C" void hid_clear_conn()
 {
     if (active_conn) {
