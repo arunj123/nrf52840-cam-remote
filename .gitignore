@@ -1,6 +1,7 @@
 # Build directories
 firmware/build/
 firmware/build_host/
+firmware/tests/build_host/
 app/build/
 
 # Configuration
@@ -15,3 +16,4 @@ __pycache__/
 # Datasheets and Proprietary Specifications
 docs/**/*.pdf
 !docs/gesture_logic.md
+
