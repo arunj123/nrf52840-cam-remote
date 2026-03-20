@@ -203,6 +203,8 @@ extern "C" void on_profile_switch_request();
 // ─── Advertising state tracking ─────────────────────────────────
 static volatile bool is_connected = false;
 static volatile bool is_advertising = false;
+static int adv_tick_count = 0;       // Count watchdog ticks to toggle modes
+static bool use_directed_adv = true; // Toggle between directed and undirected
 
 // ─── Advertising data (shared between start and watchdog) ───────
 static constexpr uint8_t ad_flags[] = { BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR };
@@ -253,16 +255,19 @@ public:
         return 0;
     }
 
-    static int try_advertising() {
+    static int try_advertising(bool force_undirected = false) {
         auto addr_opt = profile_mgr.active_addr();
         
-        if (addr_opt) {
+        if (addr_opt && !force_undirected) {
             bt_addr_le_t target;
             std::memcpy(&target, addr_opt->data(), 7);
             
             char addr_str[BT_ADDR_LE_STR_LEN];
             bt_addr_le_to_str(&target, addr_str, sizeof(addr_str));
-            printk("ADV: Directed advertising to %s\n", addr_str);
+            // Only print once per mode change to avoid log spam
+            if (adv_tick_count == 0 || !use_directed_adv) {
+                printk("ADV: Directed advertising to %s\n", addr_str);
+            }
             
             struct bt_le_adv_param param = {
                 .id = BT_ID_DEFAULT,
@@ -276,6 +281,9 @@ public:
             
             return bt_le_adv_start(&param, nullptr, 0, nullptr, 0);
         } else {
+            if (adv_tick_count == 0 || use_directed_adv) {
+                printk("ADV: Undirected advertising (slot %u)\n", profile_mgr.active_slot());
+            }
             return bt_le_adv_start(BT_LE_ADV_CONN_FAST_1,
                                    ad.data(), ad.size(),
                                    sd.data(), sd.size());
@@ -422,35 +430,54 @@ static void adv_watchdog_handler(struct k_work *work)
 {
     // If connected, no need to advertise — just reschedule
     if (is_connected) {
+        adv_tick_count = 0;
         k_work_reschedule(&adv_watchdog_work, K_SECONDS(kAdvWatchdogIntervalSec));
         return;
     }
 
+    // Toggle logic: if we have a bond, swap between directed and undirected every 20 seconds (4 ticks)
+    adv_tick_count++;
+    if (adv_tick_count > 4) {
+        adv_tick_count = 0;
+        use_directed_adv = !use_directed_adv;
+        bt_le_adv_stop(); // Force restart in new mode
+    }
+
     // Try to start advertising (will return -EALREADY if already running)
-    int err = BluetoothManager::try_advertising();
+    int err = BluetoothManager::try_advertising(!use_directed_adv);
 
     if (err == 0) {
-        // Advertising was NOT running — we just restarted it
-        printk("ADV watchdog: re-started advertising\n");
         is_advertising = true;
         LedController::set_advertising(true);
     } else if (err == -EALREADY) {
-        // Advertising is already running — all good
-        if (!is_advertising) {
-            // Fix stale state
-            is_advertising = true;
-            LedController::set_advertising(true);
-        }
+        is_advertising = true;
+        LedController::set_advertising(true);
     } else {
-        // Real error — advertising failed
         printk("ADV watchdog: adv start err %d\n", err);
         is_advertising = false;
         LedController::set_advertising(false);
-        // Try stopping cleanly so next attempt has a fresh start
         bt_le_adv_stop();
     }
 
     k_work_reschedule(&adv_watchdog_work, K_SECONDS(kAdvWatchdogIntervalSec));
+}
+
+extern "C" void clear_bonds() {
+    printk("REL: Clearing bonds for active slot %u\n", profile_mgr.active_slot());
+    
+    // Clear pairing info from BLE stack
+    bt_unpair(BT_ID_DEFAULT, NULL);
+    
+    // Reset our profile manager
+    profile_mgr.clear_active();
+    
+    // Visual/Audio feedback
+    BuzzerController::countdown_beep();
+    
+    // Force disconnect and restart advertising
+    hid_disconnect();
+    adv_tick_count = 0;
+    use_directed_adv = false; // Start with undirected to be seen
 }
 
 extern "C" void on_profile_switch_request() {

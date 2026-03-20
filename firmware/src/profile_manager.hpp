@@ -20,6 +20,7 @@
 #include <string_view>
 #include <array>
 #include <cstdio>
+#include <cstring>
 
 namespace remote {
 
@@ -93,6 +94,19 @@ public:
         char key[32];
         std::snprintf(key, sizeof(key), "profile/slot%u/addr", active_);
         StorageHal::store_addr(key, addr_bytes);
+    }
+
+    /// Clear bonding information for the active slot.
+    void clear_active() {
+        has_bond_[active_] = false;
+        std::memset(slot_addrs_[active_].data(), 0, 7);
+        
+        char key[32];
+        std::snprintf(key, sizeof(key), "profile/slot%u/addr", active_);
+        // Provide null/empty addr to HAL for deletion if supported, 
+        // or just rely on has_bond flag for logic.
+        // We'll store a zeroed address.
+        StorageHal::store_addr(key, slot_addrs_[active_].data());
     }
 
     /// @return the stored address for a slot, if it has a bond.

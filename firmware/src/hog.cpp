@@ -31,6 +31,7 @@ extern "C" void led_set_trigger_active(bool active);
 extern "C" void buzzer_beep();
 extern "C" void buzzer_long_beep();
 extern "C" void on_profile_switch_request();
+extern "C" void clear_bonds();
 
 namespace remote {
 
@@ -255,6 +256,9 @@ struct ZephyrHal {
     }
     static void on_profile_switch() {
         ::on_profile_switch_request();
+    }
+    static void clear_bonds() {
+        ::clear_bonds();
     }
 };
 
