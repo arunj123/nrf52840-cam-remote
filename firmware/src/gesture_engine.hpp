@@ -18,6 +18,7 @@ namespace remote {
  *     static void buzzer_long_beep();
  *     static void led_set_trigger_active(bool active);
  *     static void on_profile_switch();        // called on encoder long-press
+ *     static void clear_bonds();              // called on main button 5s hold
  * };
  */
 template <typename Hal>
@@ -37,22 +38,29 @@ public:
             Hal::sleep_ms(kDebounceMs);
             if (!Hal::is_button_held()) return;
 
-            // Single click
-            Hal::led_set_trigger_active(true);
-            Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-            Hal::sleep_ms(100);
-            Hal::send_hid_report(0x00);
-            Hal::led_set_trigger_active(false);
-
-            // Check for long press (poll while held)
+            // Start timing
             uint64_t t0 = Hal::get_time_ms();
             bool burst = false;
+            bool reset_req = false;
+
+            // Monitor hold duration
             while (Hal::is_button_held()) {
                 Hal::sleep_ms(kPollMs);
-                if ((Hal::get_time_ms() - t0) >= kLongPressMs) { 
-                    burst = true; 
-                    break; 
+                uint64_t duration = Hal::get_time_ms() - t0;
+                
+                if (duration >= 5000) { // 5 seconds reset
+                    reset_req = true;
+                    break;
                 }
+                if (duration >= kLongPressMs) { 
+                    burst = true; 
+                    // Continue polling to check for 5s reset
+                }
+            }
+
+            if (reset_req) {
+                Hal::clear_bonds();
+                return;
             }
 
             if (burst) {
@@ -65,7 +73,15 @@ public:
                 while (Hal::is_button_held()) {
                     Hal::sleep_ms(kPollMs);
                 }
+                return;
             }
+
+            // If we got here, it was a single click
+            Hal::led_set_trigger_active(true);
+            Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+            Hal::sleep_ms(100);
+            Hal::send_hid_report(0x00);
+            Hal::led_set_trigger_active(false);
 
             Hal::sleep_ms(kDebounceMs);
         }
