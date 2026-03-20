@@ -15,7 +15,7 @@ if [[ -f "${SCRIPT_DIR}/build.env" ]]; then
     source "${SCRIPT_DIR}/build.env"
 fi
 
-BOARD="nrf52840_mdk"
+BOARD="promicro_nrf52840"
 APP_DIR="$(dirname "${SCRIPT_DIR}")/firmware"
 
 # Defaults to a sibling directory of this project root. Override with env vars.

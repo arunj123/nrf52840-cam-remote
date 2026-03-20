@@ -13,8 +13,26 @@
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
 
 / {
-	aliases {
+	chosen {
 		sw0 = &button0;
+		buzzer = &pwm_buzzer0;
+		qdec0 = &qdec0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		led_red: led_0 {
+			gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+			label = "Red LED";
+		};
+	};
+
+	aliases {
+		led0 = &led_red;
+		led1 = &led_red;
+		led2 = &led_red;
+		sw0 = &button0;
+		sw1 = &button2;
 		buzzer = &pwm_buzzer0;
 		qdec0 = &qdec0;
 	};

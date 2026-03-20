@@ -2,6 +2,8 @@
 
 #include "hog.hpp" // For HidKey
 #include <cstdint>
+#include <cstdlib>
+#include <zephyr/sys/printk.h>
 
 namespace remote {
 
@@ -70,17 +72,26 @@ public:
     }
 
     // Called from encoder polling timer when rotation is detected
+    // Note: For this hardware combo, each physical detent generates 60 degrees.
     static void on_encoder_rotate(int steps) {
-        if (steps > 0) {
-            // Clockwise -> Volume Up
-            Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-            Hal::sleep_ms(30);
-            Hal::send_hid_report(0x00);
-        } else if (steps < 0) {
-            // Counter-Clockwise -> Volume Down
-            Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
-            Hal::sleep_ms(30);
-            Hal::send_hid_report(0x00);
+        static int accumulated_degrees = 0;
+        accumulated_degrees += steps;
+
+        if (abs(accumulated_degrees) >= 60) {
+            int sign = (accumulated_degrees > 0) ? 1 : -1;
+            accumulated_degrees %= 60;
+            
+            if (sign > 0) {
+                // Clockwise -> Volume Up
+                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+                Hal::sleep_ms(30);
+                Hal::send_hid_report(0x00);
+            } else {
+                // Counter-Clockwise -> Volume Down
+                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
+                Hal::sleep_ms(30);
+                Hal::send_hid_report(0x00);
+            }
         }
     }
 
