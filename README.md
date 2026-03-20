@@ -5,47 +5,30 @@ A Bluetooth Low Energy HID Camera Remote using the MakerDiary nRF52840 MDK USB D
 ## 1. Hardware Setup
 
 ### Supported Boards
-- **MakerDiary nRF52840 MDK USB Dongle**: [MakerDiary Wiki](https://wiki.makerdiary.com/nrf52840-mdk-usb-dongle/) (Default target)
 - **Pro Micro nRF52840**: A Pro Micro-compatible nRF52840 board (e.g., Nice!Nano, Bluemicro, or custom).
 
-### Pin Mappings
+### Pin Mappings (Pro Micro)
 
-| Feature | MDK Dongle (P0.xx) | Pro Micro (Dxx / P0.xx) |
-| :--- | :--- | :--- |
-| **Trigger 1** | `P0.05` | `D5` (P0.20) |
-| **Trigger 2** | `P0.04` | `D4` (P0.17) |
-| **Mute Toggle** | `P0.07` | `D7` (P0.24) |
-| **Encoder A** | `P0.03` | `D2` (P0.10) |
-| **Encoder B** | `P0.06` | `D3` (P1.11) |
-| **Buzzer** | `P0.02` | `D6` (P0.22) |
-| **Red LED** | `P0.23` | `P0.15` |
-| **Green LED** | `P0.22` | *(None)* |
-| **Blue LED** | `P0.24` | *(None)* |
+The firmware is configured for the following physical connections:
 
-### Wiring for Flashing (ST-Link V2)
-To recover or flash the device manually (if the USB bootloader is missing or locked), connect an **ST-Link V2** to the 4-pin header:
-- **SWDIO**: Signal Data
-- **SWCLK**: Signal Clock
-- **GND**: Common Ground
-- **3.3V**: Power (The board must be powered to flash)
-
-### External Trigger Button & Buzzer
-- **Trigger Pin (Primary)**: Pin labeled **P4** (P0.04) shorted to **GND**.
-- **Trigger Pin (Secondary)**: Pin labeled **P5** (P0.05) shorted to **GND**.
-- **Buzzer Feedback**: Connect a **Passive Ceramic Piezo** wafer between **P2** (P0.02) and **GND**.
-- **Action**: Triggers a Red LED pulse, a **50ms (4kHz) acoustic beep**, and sends the Bluetooth "Volume Up" command.
-
-### Rotary Encoder (Optional)
-For volume control, a rotary encoder (e.g., EC11) can be connected to the following pins on Header 1:
-
-| Dongle Header Pin | nRF52840 GPIO | Encoder Component | Function |
+| Physical Pin # | Label | GPIO | Function in App |
 | :--- | :--- | :--- | :--- |
-| **Pin 5** | `P0.03` | **Phase A** | Quad Decoder A |
-| **Pin 8** | `P0.06` | **Phase B** | Quad Decoder B |
-| **Pin 9** | `P0.07` | **Switch (Button)** | Mute Toggle |
-| **Pin 2** | **GND** | **Common (C)** | Ground Reference |
+| **Pin 5** | **D2** | `P0.10` | Encoder Phase A |
+| **Pin 6** | **D3** | `P1.11` | Encoder Phase B |
+| **Pin 7** | **D4** | `P0.17` | **Trigger 2** |
+| **Pin 8** | **D5** | `P0.20` | **Trigger 1** (Main Shutter) |
+| **Pin 9** | **D6** | `P0.22` | Buzzer (4kHz PWM) |
+| **Pin 10** | **D7** | `P0.24` | **Encoder Switch** (Mute/Profile) |
+| **On-board** | **LED** | `P0.15` | Status Indicator (Blue/Red) |
 
-> **Note**: Internal pull-up resistors are enabled in software, so no external pull-ups are required for mechanical encoders.
+---
+
+### Hardware Verification
+If you are setting up new hardware, you can use the **`board-verification`** branch to test your wiring (LED blinking, buzzer beeps, and USB encoder logs).
+
+```bash
+git checkout board-verification
+```
 
 ### LED & Audio Feedback
 - **🔵 Blue**: Advertising (Looking for a pair).
@@ -206,11 +189,21 @@ python -m serial.tools.miniterm COM<X> 115200
 > **Note**: Replace `COM<X>` with your actual port (e.g., `COM3`). Exit with `Ctrl+]`.
 
 ### Step 4: Pro Micro Flashing (UF2)
-If using the **Pro Micro nRF52840**:
 1. **Enter Bootloader**: Quickly **double-tap** the Reset button (or bridge RST to GND twice).
 2. **Mount**: A new drive named `UF2BOOT` will appear on your computer.
-3. **Flash**: Drag and drop the `zephyr.uf2` file onto the `UF2BOOT` drive.
+3. **Flash**: Drag and drop the `zephyr.uf2` file from `firmware/build_promicro_nrf52840_nrf52840_uf2/zephyr/` onto the `UF2BOOT` drive.
 4. The board will automatically reboot with the new firmware.
+
+---
+
+### Step 5: Monitor Logs (Windows/USB)
+The Pro Micro port is configured as a USB CDC ACM console. Use `pyserial`'s miniterm:
+
+1. **Identify COM Port**: Check Device Manager for "Zephyr CDC ACM" (e.g., COM12).
+2. **Run Monitor**:
+```powershell
+python -m serial.tools.miniterm COM<X> 115200
+```
 
 ### Step 5: Pair with Phone
 1. On Android/iOS: **Settings → Bluetooth → Scan**.

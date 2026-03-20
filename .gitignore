@@ -3,6 +3,7 @@ firmware/build/
 firmware/build_host/
 firmware/build_nrf52840_mdk/
 firmware/build_promicro_nrf52840/
+firmware/build_promicro_nrf52840_nrf52840_uf2/
 firmware/tests/build_host/
 app/build/
 
