@@ -73,7 +73,7 @@ The project is built using **Modern C++23** for improved modularity and safety.
 - **Gesture Logic**: Detailed state transitions and timing are documented in [docs/gesture_logic.md](docs/gesture_logic.md).
 - **Button Engine**: Interrupt-driven thread with automated power-saving sleep. Deadlock-proof.
 - **Profile**: Consumer Control (Media Remote) via HOGP.
-- **Pairing**: "Just Works" (no PIN required, encrypted link with bonding).
+- **Pairing**: Passkey (MITM) pairing to satisfy Windows 10/11 security enforcement for BLE Keyboards.
 
 ### Developer Rules & Requirements
 To maintain consistency and high code quality, this project uses automated agent workflows:
@@ -225,9 +225,9 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 
 ## 5. Bluetooth Details
 - **Device Name**: `Cam Remote Pro`
-- **Appearance**: Remote Control (384)
+- **Appearance**: Keyboard (961) - Required for Windows to correctly map Consumer Control buttons natively.
 - **PnP ID**: Vendor `0x05AC`, Product `0x0220` (Apple Vendor ID used for driver-less Windows compatibility)
-- **Security**: "Just Works" encryption (BT_SECURITY_L2). No passkey required.
+- **Security**: Passkey/MITM encryption (BT_SECURITY_L4). Windows 10/11 strictly mandates Passkey pairing for BLE Keyboards to prevent injection attacks, so a 6-digit PIN is displayed on the serial console during pairing.
 - **Advertising Watchdog**: Background worker ensures advertising automatically restarts if the BLE stack hits an error or if the device disconnects.
 - **Persistent Bonding**: Pairing info is stored in NVS, allowing auto-reconnection after power cycles.
 - **Multi-Device Profiles**: Supports bonding with up to 3 devices. One active connection at a time; cycle with encoder button long-press.
