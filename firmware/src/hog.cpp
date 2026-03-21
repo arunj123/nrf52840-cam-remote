@@ -72,28 +72,27 @@ constexpr hids_report input_report_ref = {
     .type = static_cast<uint8_t>(HidReportType::Input),
 };
 
-uint8_t protocol_mode = 0x01;
 uint8_t ctrl_point;
 
-constexpr std::array<uint8_t, 43> report_map = {
-    0x05, 0x0c,
-    0x09, 0x01,
-    0xa1, 0x01,
-    0x85, 0x01,
-    0x15, 0x00,
-    0x25, 0x01,
-    0x75, 0x01,
-    0x95, 0x06,
-    0x09, 0xe9,    /* Volume Increment */
-    0x09, 0xea,    /* Volume Decrement */
-    0x09, 0xe2,    /* Mute */
-    0x09, 0xcd,    /* Play/Pause */
-    0x09, 0xb5,    /* Scan Next Track */
-    0x09, 0xb6,    /* Scan Previous Track */
-    0x81, 0x02,
-    0x95, 0x02,
-    0x81, 0x03,
-    0xc0
+constexpr std::array<uint8_t, 35> report_map = {
+    0x05, 0x0c,       // Usage Page (Consumer)
+    0x09, 0x01,       // Usage (Consumer Control)
+    0xa1, 0x01,       // Collection (Application)
+    0x85, 0x01,       //   Report ID (1)
+    0x15, 0x00,       // Logical Minimum (0)
+    0x25, 0x01,       // Logical Maximum (1)
+    0x75, 0x01,       // Report Size (1)
+    0x95, 0x06,       // Report Count (6)
+    0x09, 0xe9,       // Usage (Volume Increment)
+    0x09, 0xea,       // Usage (Volume Decrement)
+    0x09, 0xe2,       // Usage (Mute)
+    0x09, 0xcd,       // Usage (Play/Pause)
+    0x09, 0xb5,       // Usage (Scan Next Track)
+    0x09, 0xb6,       // Usage (Scan Previous Track)
+    0x81, 0x02,       // Input (Data, Variable, Absolute)
+    0x95, 0x02,       // Report Count (2) - padding
+    0x81, 0x03,       // Input (Constant, Variable, Absolute)
+    0xc0              // End Collection
 };
 
 // ─── GATT Callbacks ──────────────────────────────────────────────
@@ -122,8 +121,7 @@ ssize_t read_report_ref(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 ssize_t read_input_report(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                           void *buf, uint16_t len, uint16_t offset)
 {
-    static constexpr uint8_t zero_report = 0;
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &zero_report, sizeof(zero_report));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, nullptr, 0);
 }
 
 ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -145,33 +143,12 @@ ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 #define SAMPLE_BT_PERM_WRITE BT_GATT_PERM_WRITE_ENCRYPT
 #endif
 
-ssize_t read_protocol_mode(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                           void *buf, uint16_t len, uint16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &protocol_mode,
-                             sizeof(protocol_mode));
-}
-
-ssize_t write_protocol_mode(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                            const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
-{
-    if (offset + len > sizeof(protocol_mode)) {
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-    }
-    memcpy(&protocol_mode + offset, buf, len);
-    return len;
-}
 
 } // namespace
 
-/* HID Service Declaration */
+/* HID Service Declaration — matches Zephyr peripheral_hids sample */
 BT_GATT_SERVICE_DEFINE(hog_svc,
     BT_GATT_PRIMARY_SERVICE(BT_UUID_HIDS),
-    BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_PROTOCOL_MODE,
-                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-                           BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-                           read_protocol_mode, write_protocol_mode,
-                           &protocol_mode),
     BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_INFO, BT_GATT_CHRC_READ,
                            BT_GATT_PERM_READ, read_info, nullptr, const_cast<hids_info*>(&info)),
     BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_REPORT_MAP, BT_GATT_CHRC_READ,
@@ -225,7 +202,7 @@ static void send_hid_report(uint8_t key_bits)
     if (!conn) {
         return;
     }
-    bt_gatt_notify(conn, &hog_svc.attrs[8], &key_bits, sizeof(key_bits));
+    bt_gatt_notify(conn, &hog_svc.attrs[6], &key_bits, sizeof(key_bits));
 }
 
 // ─── Encoder Polling Timer ──────────────────────────────────────

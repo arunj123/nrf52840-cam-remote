@@ -1,7 +1,7 @@
 #include "hog.hpp"
 #include "battery.hpp"
 #include "profile_manager.hpp"
-#include "provisioning_service.hpp"
+// #include "provisioning_service.hpp"  // Disabled: custom vendor service can confuse Windows HID
 
 #include <zephyr/types.h>
 #include <zephyr/sys/printk.h>
@@ -251,6 +251,7 @@ public:
             return err;
         }
 
+        // Register auth callbacks to provide Passkey display (Windows demands MITM)
         bt_conn_auth_cb_register(&auth_cb);
         return 0;
     }
@@ -326,6 +327,9 @@ private:
             settings_load();
             printk("Settings loaded\n");
         }
+
+        // Auto-wiping bonds on boot was preventing persistent pairing with Windows.
+        // It has been removed so Windows won't disconnect due to matching keys missing.
 
         profile_mgr.init();
         printk("Profile manager init (slot %u)\n", profile_mgr.active_slot());
@@ -407,6 +411,11 @@ private:
     };
 
     static inline bt_conn_auth_cb auth_cb = {
+        .passkey_display = [](struct bt_conn *conn, unsigned int passkey) {
+            char addr[BT_ADDR_LE_STR_LEN];
+            bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+            printk("Passkey for %s: %06u\n", addr, passkey);
+        },
         .cancel = [](struct bt_conn *conn) {
             char addr[BT_ADDR_LE_STR_LEN];
             bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
