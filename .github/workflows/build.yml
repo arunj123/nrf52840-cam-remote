@@ -2,9 +2,9 @@ name: Build Firmware
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, feature/multiple-profiles ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, feature/multiple-profiles ]
   workflow_dispatch:
 
 env:
