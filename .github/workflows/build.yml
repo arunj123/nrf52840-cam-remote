@@ -76,6 +76,7 @@ jobs:
       run: |
         if [ ! -d "${ZEPHYR_WORKSPACE}/.west" ]; then
           mkdir -p ${ZEPHYR_WORKSPACE}
+          cd ${ZEPHYR_WORKSPACE}
           west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0
           west update
         else
