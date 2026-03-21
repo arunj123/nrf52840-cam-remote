@@ -271,7 +271,7 @@ public:
             }
             
             struct bt_le_adv_param param = {
-                .id = BT_ID_DEFAULT,
+                .id = profile_mgr.active_slot(),
                 .sid = 0,
                 .secondary_max_skip = 0,
                 .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY | BT_LE_ADV_OPT_DIR_ADDR_RPA,
@@ -285,7 +285,9 @@ public:
             if (adv_tick_count == 0 || use_directed_adv) {
                 printk("ADV: Undirected advertising (slot %u)\n", profile_mgr.active_slot());
             }
-            return bt_le_adv_start(BT_LE_ADV_CONN_FAST_1,
+            struct bt_le_adv_param param = *BT_LE_ADV_CONN_FAST_1;
+            param.id = profile_mgr.active_slot();
+            return bt_le_adv_start(&param,
                                    ad.data(), ad.size(),
                                    sd.data(), sd.size());
         }
@@ -328,8 +330,16 @@ private:
             printk("Settings loaded\n");
         }
 
-        // Auto-wiping bonds on boot was preventing persistent pairing with Windows.
-        // It has been removed so Windows won't disconnect due to matching keys missing.
+        size_t id_count = 0;
+        bt_id_get(nullptr, &id_count);
+        while (id_count < 3) {
+            int new_id = bt_id_create(nullptr, nullptr);
+            if (new_id < 0) {
+                printk("Failed to create BT ID (err %d)\n", new_id);
+                break;
+            }
+            id_count++;
+        }
 
         profile_mgr.init();
         printk("Profile manager init (slot %u)\n", profile_mgr.active_slot());
@@ -474,8 +484,8 @@ static void adv_watchdog_handler(struct k_work *work)
 extern "C" void clear_bonds() {
     printk("REL: Clearing bonds for active slot %u\n", profile_mgr.active_slot());
     
-    // Clear pairing info from BLE stack
-    bt_unpair(BT_ID_DEFAULT, NULL);
+    // Clear pairing info from BLE stack only for the active slot
+    bt_unpair(profile_mgr.active_slot(), NULL);
     
     // Reset our profile manager
     profile_mgr.clear_active();
