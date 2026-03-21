@@ -1,4 +1,9 @@
 /*
- * Global overlay (empty).
- * Board-specific overlays are in boards/ folder.
+ * Global overlay.
  */
+
+&zephyr_udc0 {
+	cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+	};
+};
