@@ -98,13 +98,13 @@ public:
             accumulated_degrees %= 60;
             
             if (sign > 0) {
-                // Clockwise -> Volume Up
-                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
+                // Hardware positive = Counter-Clockwise (Volume Down)
+                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
                 Hal::sleep_ms(30);
                 Hal::send_hid_report(0x00);
             } else {
-                // Counter-Clockwise -> Volume Down
-                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
+                // Hardware negative = Clockwise (Volume Up)
+                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
                 Hal::sleep_ms(30);
                 Hal::send_hid_report(0x00);
             }
