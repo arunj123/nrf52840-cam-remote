@@ -251,8 +251,8 @@ public:
             return err;
         }
 
-        // Do not register auth callbacks to enforce 'Just Works' (NoInputNoOutput)
-        // bt_conn_auth_cb_register(&auth_cb);
+        // Register auth callbacks to provide Passkey display (Windows demands MITM)
+        bt_conn_auth_cb_register(&auth_cb);
         return 0;
     }
 
