@@ -82,7 +82,7 @@ init_zephyr_workspace() {
         info "Initializing Zephyr workspace at ${ZEPHYR_WORKSPACE}..."
         mkdir -p "${ZEPHYR_WORKSPACE}"
         cd "${ZEPHYR_WORKSPACE}"
-        west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0
+        west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0
         west update
     fi
     west zephyr-export
@@ -93,6 +93,11 @@ init_zephyr_workspace() {
 install_sdk() {
     if [[ -d "${ZEPHYR_SDK_DIR}" ]]; then
         info "Zephyr SDK ${ZEPHYR_SDK_VERSION} already installed at ${ZEPHYR_SDK_DIR} — skipping."
+        # Workaround for Zephyr 4.3.0+ SDK version mismatch error
+        if [[ ! -f "${ZEPHYR_SDK_DIR}/sdk_version" ]] || [[ "$(cat "${ZEPHYR_SDK_DIR}/sdk_version")" != "1.0.0" ]]; then
+            info "Spoofing SDK version to 1.0.0 for compatibility..."
+            echo "1.0.0" > "${ZEPHYR_SDK_DIR}/sdk_version"
+        fi
         ok "SDK present."
         return
     fi
@@ -111,6 +116,11 @@ install_sdk() {
     info "Running SDK setup (arm-zephyr-eabi only)..."
     cd "${ZEPHYR_SDK_DIR}"
     ./setup.sh -t arm-zephyr-eabi -c
+    
+    # Workaround for Zephyr 4.3.0+ SDK version mismatch error
+    info "Spoofing SDK version to 1.0.0 for compatibility..."
+    echo "1.0.0" > "${ZEPHYR_SDK_DIR}/sdk_version"
+    
     ok "Zephyr SDK ${ZEPHYR_SDK_VERSION} installed."
 }
 

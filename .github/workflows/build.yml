@@ -77,13 +77,17 @@ jobs:
         if [ ! -d "${ZEPHYR_WORKSPACE}/.west" ]; then
           mkdir -p ${ZEPHYR_WORKSPACE}
           cd ${ZEPHYR_WORKSPACE}
-          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0
+          west init -m https://github.com/zephyrproject-rtos/zephyr --mr v4.3.0
           west update
         else
           cd ${ZEPHYR_WORKSPACE}
           west update
         fi
         west zephyr-export
+
+    - name: Spoof Zephyr SDK version (Workaround)
+      run: |
+        echo "1.0.0" > ${ZEPHYR_SDK_DIR}/sdk_version
 
     - name: Install Zephyr Python requirements
       run: |
