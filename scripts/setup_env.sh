@@ -82,7 +82,7 @@ init_zephyr_workspace() {
         info "Initializing Zephyr workspace at ${ZEPHYR_WORKSPACE}..."
         mkdir -p "${ZEPHYR_WORKSPACE}"
         cd "${ZEPHYR_WORKSPACE}"
-        west init
+        west init -m https://github.com/zephyrproject-rtos/zephyr --mr v3.7.0
         west update
     fi
     west zephyr-export
