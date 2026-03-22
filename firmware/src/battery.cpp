@@ -23,6 +23,9 @@ namespace remote {
 
 static const struct device *adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc));
 static int16_t adc_buf;
+static int16_t sample_history[32] = {0};
+static int history_idx = 0;
+static bool history_filled = false;
 
 static struct adc_channel_cfg channel_cfg = ADC_CHANNEL_CFG_DT(DT_CHILD(DT_NODELABEL(adc), channel_0));
 
@@ -49,20 +52,35 @@ static uint8_t do_read_level()
         return 0;
     }
 
-    uint16_t mv = raw_to_millivolts(adc_buf);
+    // [FILTER] 32-point Moving Average
+    sample_history[history_idx] = adc_buf;
+    history_idx = (history_idx + 1) % 32;
+    if (history_idx == 0) history_filled = true;
+
+    int32_t sum = 0;
+    int count = history_filled ? 32 : history_idx;
+    if (count == 0) count = 1;
+    for (int i = 0; i < count; ++i) {
+        sum += sample_history[i];
+    }
+    int16_t avg_raw = static_cast<int16_t>(sum / count);
+
+    uint16_t mv = raw_to_millivolts(avg_raw);
     uint8_t percent = millivolts_to_percent(mv);
 
-    printk("BAT: raw=%d, mV=%u, %%=%u\n", adc_buf, mv, percent);
+    printk("BAT: raw=%d, avg=%d, mV=%u, %%=%u\n", adc_buf, avg_raw, mv, percent);
     return percent;
 }
 
 static void battery_work_handler(struct k_work *work)
 {
+    printk("Woke up (Battery)!\n");
     uint8_t level = do_read_level();
     bt_bas_set_battery_level(level);
     printk("BAT: %u%%\n", level);
 
     k_work_reschedule(&battery_work, K_SECONDS(kUpdateIntervalSec));
+    printk("Zzz... Sleeping (Battery)\n");
 }
 
 // ─── BatteryMonitor methods ─────────────────────────────────────

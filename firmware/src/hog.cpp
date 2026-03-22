@@ -225,6 +225,9 @@ struct ZephyrHal {
     static void send_hid_report(uint8_t key_bits) {
         ::remote::send_hid_report(key_bits);
     }
+    static void buzzer_beep() {
+        ::buzzer_beep();
+    }
     static void buzzer_long_beep() {
         ::buzzer_long_beep();
     }
@@ -247,7 +250,11 @@ static void encoder_timer_handler(struct k_timer *timer_id)
 
     struct sensor_value val;
     if (sensor_sample_fetch(qdec_dev) == 0 && sensor_channel_get(qdec_dev, SENSOR_CHAN_ROTATION, &val) == 0) {
-        Engine::on_encoder_rotate(val.val1);
+        if (val.val1 != 0) {
+            printk("Woke up (Encoder)!\n");
+            Engine::on_encoder_rotate(val.val1);
+            printk("Zzz... Sleeping (Encoder)\n");
+        }
     }
 }
 
@@ -291,7 +298,9 @@ void encoder_button_thread(void *, void *, void *)
     printk("Encoder button thread started\n");
 
     while (true) {
+        printk("Zzz... Sleeping (EncBtn)\n");
         k_sem_take(&enc_btn_sem, K_FOREVER);
+        printk("Woke up (EncBtn)!\n");
         Engine::on_encoder_button_press();
         k_sem_reset(&enc_btn_sem);
     }

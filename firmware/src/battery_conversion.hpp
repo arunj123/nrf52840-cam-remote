@@ -12,14 +12,19 @@
 
 namespace remote {
 
-/// ADC resolution (10-bit)
-inline constexpr uint16_t kAdcResolution = 10;
+/// ADC resolution (12-bit with 16x hardware oversampling)
+inline constexpr uint16_t kAdcResolution = 12;
 
-/// Convert a raw ADC sample to millivolts (assuming 3.6V reference, 10-bit).
+/// Convert a raw ADC sample to millivolts.
+/// Uses 12-bit resolution (0-4095) with 16x hardware oversampling.
+/// ADC config: GAIN=1/6, REF=0.6V internal → full-scale = 3.6V.
+/// With voltage divider on AIN5 (P0.29):
+///   mV = raw * 3600 / 4096 * divider_ratio
+/// Calibrated so that raw≈312 (12-bit) → 4210mV.
 constexpr uint16_t raw_to_millivolts(int16_t raw) noexcept {
     if (raw < 0) raw = 0;
     return static_cast<uint16_t>(
-        (static_cast<uint32_t>(raw) * 3600) / (1 << kAdcResolution)
+        (static_cast<uint32_t>(raw) * 55000) / (1 << kAdcResolution)
     );
 }
 
