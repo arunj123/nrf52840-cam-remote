@@ -33,6 +33,7 @@ public:
 
     static void beep() {
         if (device_is_ready(pwm_buzzer.dev)) {
+            printk("BEEP\n");
             uint32_t pulse = pwm_buzzer.period / 2;
             pwm_set_pulse_dt(&pwm_buzzer, pulse);
             k_sleep(K_MSEC(50));
@@ -70,34 +71,47 @@ private:
 class LedController {
 public:
     static void init() {
-        if (device_is_ready(led_green.port)) gpio_pin_configure_dt(&led_green, GPIO_OUTPUT_INACTIVE);
-        if (device_is_ready(led_red.port)) gpio_pin_configure_dt(&led_red, GPIO_OUTPUT_INACTIVE);
-        if (device_is_ready(led_blue.port)) gpio_pin_configure_dt(&led_blue, GPIO_OUTPUT_INACTIVE);
+        init_pin(led_red, "Red");
     }
 
-    static void set_connected(bool connected) {
-        if (device_is_ready(led_green.port)) gpio_pin_set_dt(&led_green, 0); // Disable LED to save power during idle sleep
-    }
-
-    static void set_advertising(bool advertising) {
-        if (device_is_ready(led_blue.port)) gpio_pin_set_dt(&led_blue, 0); // Disable LED to save power during idle sleep
-    }
+    static void set_connected(bool connected) {}
+    static void set_advertising(bool advertising) {}
 
     static void set_trigger_active(bool active) {
         if (active) {
-            if (device_is_ready(led_green.port)) gpio_pin_set_dt(&led_green, 0);
+            printk("LED: 1 (ON)\n");
             if (device_is_ready(led_red.port)) gpio_pin_set_dt(&led_red, 1);
             BuzzerController::beep();
         } else {
+            printk("LED: 0 (OFF)\n");
             if (device_is_ready(led_red.port)) gpio_pin_set_dt(&led_red, 0);
-            if (device_is_ready(led_green.port)) gpio_pin_set_dt(&led_green, 0); // Keep green OFF to maintain dark sleep state
         }
     }
 
 private:
-    static inline const struct gpio_dt_spec led_green = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios, {0});
-    static inline const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led1), gpios, {0});
-    static inline const struct gpio_dt_spec led_blue = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led2), gpios, {0});
+    static void init_pin(const struct gpio_dt_spec &spec, const char *name) {
+        if (device_is_ready(spec.port)) {
+            gpio_pin_configure_dt(&spec, GPIO_OUTPUT_INACTIVE);
+            printk("LED %s (pin %u) initialized to OFF\n", name, spec.pin);
+        }
+    }
+
+    static inline const struct gpio_dt_spec led_red = GPIO_DT_SPEC_GET_OR(DT_ALIAS(led0), gpios, {0});
+};
+
+class PowerController {
+public:
+    static void init() {
+        if (device_is_ready(vcc_rail.port)) {
+            gpio_pin_configure_dt(&vcc_rail, GPIO_OUTPUT_ACTIVE);
+            printk("VCC Rail (P0.13) enabled\n");
+        } else {
+            printk("VCC Rail device not ready\n");
+        }
+    }
+
+private:
+    static inline const struct gpio_dt_spec vcc_rail = GPIO_DT_SPEC_GET_OR(DT_ALIAS(vcc_rail), gpios, {0});
 };
 
 } // namespace remote
@@ -465,12 +479,12 @@ static void adv_watchdog_handler(struct k_work *work)
     // Try to start advertising (will return -EALREADY if already running)
     int err = BluetoothManager::try_advertising(!use_directed_adv);
 
-    if (err == 0) {
-        is_advertising = true;
-        LedController::set_advertising(true);
-    } else if (err == -EALREADY) {
-        is_advertising = true;
-        LedController::set_advertising(true);
+    if (err == 0 || err == -EALREADY) {
+        // Double-check we didn't connect asynchronously while try_advertising was blocking
+        if (!is_connected) {
+            is_advertising = true;
+            LedController::set_advertising(true);
+        }
     } else {
         printk("ADV watchdog: adv start err %d\n", err);
         is_advertising = false;
@@ -521,6 +535,7 @@ int main() {
     printk("Starting Camera Remote (Modern C++)...\n");
 
     remote::LedController::init();
+    remote::PowerController::init();
     remote::BuzzerController::init();
     remote::BluetoothManager::start();
     remote::BatteryMonitor::init();

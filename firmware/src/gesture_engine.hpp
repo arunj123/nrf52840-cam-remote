@@ -15,6 +15,7 @@ namespace remote {
  *     static bool is_button_held();
  *     static bool is_encoder_button_held();
  *     static void send_hid_report(uint8_t key_bits);
+ *     static void buzzer_beep();
  *     static void buzzer_long_beep();
  *     static void led_set_trigger_active(bool active);
  *     static void on_profile_switch();        // called on encoder long-press
@@ -78,6 +79,7 @@ public:
 
             // If we got here, it was a single click
             Hal::led_set_trigger_active(true);
+            Hal::buzzer_beep();
             Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
             Hal::sleep_ms(100);
             Hal::send_hid_report(0x00);
@@ -133,6 +135,7 @@ public:
         }
 
         // Short press → mute toggle
+        printk("Encoder Btn: Mute Toggle\n");
         Hal::send_hid_report(static_cast<uint8_t>(HidKey::Mute));
         Hal::sleep_ms(50);
         Hal::send_hid_report(0x00);

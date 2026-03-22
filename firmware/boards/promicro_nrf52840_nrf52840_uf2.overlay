@@ -22,19 +22,30 @@
 	leds {
 		compatible = "gpio-leds";
 		led_red: led_0 {
+			/* Physical onboard LED on Tenstar/Supermini boards */
 			gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
 			label = "Red LED";
+		};
+		/* Note: P0.08 and P0.06 are physical RX/TX pins on the board edge */
+		/* led_green: led_1 { gpios = <&gpio0 8 GPIO_ACTIVE_LOW>; }; */
+		/* led_blue: led_2 { gpios = <&gpio0 6 GPIO_ACTIVE_LOW>; };  */
+
+		vcc_rail: vcc_rail {
+			/* Physical P0.13 controls the 3.3V rail for peripherals */
+			gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+			label = "External VCC Rail Control";
 		};
 	};
 
 	aliases {
 		led0 = &led_red;
-		led1 = &led_red;
-		led2 = &led_red;
+		/* led1 = &led_green; */
+		/* led2 = &led_blue;  */
 		sw0 = &button0;
 		sw1 = &button2;
 		buzzer = &pwm_buzzer0;
 		qdec0 = &qdec0;
+		vcc-rail = &vcc_rail;
 	};
 
 	pwm_buzzers {
@@ -75,8 +86,9 @@
 		zephyr,gain = "ADC_GAIN_1_6";
 		zephyr,reference = "ADC_REF_INTERNAL";
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
-		zephyr,input-positive = <NRF_SAADC_VDD>; /* Default VDD measurement */
-		zephyr,resolution = <10>;
+		zephyr,input-positive = <NRF_SAADC_AIN5>; /* Battery Sense (P0.29) */
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>; /* 16x oversampling (2^4) */
 	};
 };
 
