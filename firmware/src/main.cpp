@@ -219,6 +219,8 @@ static volatile bool is_connected = false;
 static volatile bool is_advertising = false;
 static int adv_tick_count = 0;       // Count watchdog ticks to toggle modes
 static bool use_directed_adv = true; // Toggle between directed and undirected
+static int8_t last_adv_id = -1;      // Track which identity was last used for advertising
+static bool last_adv_mode_directed = false;
 
 // ─── Advertising data (shared between start and watchdog) ───────
 static constexpr uint8_t ad_flags[] = { BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR };
@@ -468,25 +470,40 @@ static void adv_watchdog_handler(struct k_work *work)
         return;
     }
 
+    uint8_t current_id = profile_mgr.active_slot();
+    bool should_be_directed = use_directed_adv;
+
     // Toggle logic: if we have a bond, swap between directed and undirected every 20 seconds (4 ticks)
     adv_tick_count++;
     if (adv_tick_count > 4) {
         adv_tick_count = 0;
         use_directed_adv = !use_directed_adv;
+        should_be_directed = use_directed_adv;
+        printk("ADV watchdog: Toggle mode to %s\n", should_be_directed ? "directed" : "undirected");
         bt_le_adv_stop(); // Force restart in new mode
     }
 
+    // IDENTITY SWITCH DETECTION: If the profile changed while we were advertising, 
+    // we MUST stop and restart to apply the new identity/bonds.
+    if (is_advertising && (current_id != last_adv_id || should_be_directed != last_adv_mode_directed)) {
+        printk("ADV watchdog: Profile/Mode changed (%d -> %d), restarting adv\n", last_adv_id, current_id);
+        bt_le_adv_stop();
+        is_advertising = false;
+    }
+
     // Try to start advertising (will return -EALREADY if already running)
-    int err = BluetoothManager::try_advertising(!use_directed_adv);
+    int err = BluetoothManager::try_advertising(!should_be_directed);
 
     if (err == 0 || err == -EALREADY) {
         // Double-check we didn't connect asynchronously while try_advertising was blocking
         if (!is_connected) {
             is_advertising = true;
+            last_adv_id = current_id;
+            last_adv_mode_directed = should_be_directed;
             LedController::set_advertising(true);
         }
     } else {
-        printk("ADV watchdog: adv start err %d\n", err);
+        printk("ADV watchdog: adv start err %d (slot %u)\n", err, current_id);
         is_advertising = false;
         LedController::set_advertising(false);
         bt_le_adv_stop();
@@ -508,9 +525,14 @@ extern "C" void clear_bonds() {
     BuzzerController::countdown_beep();
     
     // Force disconnect and restart advertising
+    bt_le_adv_stop();
+    is_advertising = false;
     hid_disconnect();
     adv_tick_count = 0;
     use_directed_adv = false; // Start with undirected to be seen
+    
+    // Trigger watchdog immediately
+    k_work_reschedule(&adv_watchdog_work, K_MSEC(100));
 }
 
 extern "C" void on_profile_switch_request() {
@@ -523,10 +545,21 @@ extern "C" void on_profile_switch_request() {
         if (i < new_slot) k_msleep(150);
     }
 
+    // Explicitly stop advertising to ensure the identity change is applied
+    bt_le_adv_stop();
+    is_advertising = false;
+
     // Disconnect current connection so we can re-advertise to the new slot's peer
     hid_disconnect();
     
-    // Do not force start_advertising() here since it will be triggered by disconnected() callback
+    // Reset watchdog ticks so we start fresh with the new profile
+    adv_tick_count = 0;
+    use_directed_adv = true; 
+
+    // Trigger watchdog immediately if not connected, otherwise wait for disconnect callback
+    if (!is_connected) {
+        k_work_reschedule(&adv_watchdog_work, K_MSEC(100));
+    }
 }
 
 } // namespace remote
