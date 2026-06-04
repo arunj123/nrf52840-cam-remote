@@ -22,6 +22,7 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/settings/settings.h>
 
 #include <array>
 #include <span>
@@ -36,6 +37,7 @@ extern "C" void clear_bonds();
 namespace remote {
 
 namespace {
+extern "C" uint8_t get_active_profile_id();
 
 // ─── HID Service Internals ───────────────────────────────────────
 
@@ -100,6 +102,9 @@ constexpr std::array<uint8_t, 35> report_map = {
 ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                   void *buf, uint16_t len, uint16_t offset)
 {
+    if (get_active_profile_id() == 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data,
                              sizeof(hids_info));
 }
@@ -107,6 +112,9 @@ ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 ssize_t read_report_map(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                         void *buf, uint16_t len, uint16_t offset)
 {
+    if (get_active_profile_id() == 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
     return bt_gatt_attr_read(conn, attr, buf, len, offset, report_map.data(),
                              report_map.size());
 }
@@ -114,6 +122,9 @@ ssize_t read_report_map(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 ssize_t read_report_ref(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                         void *buf, uint16_t len, uint16_t offset)
 {
+    if (get_active_profile_id() == 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data,
                              sizeof(hids_report));
 }
@@ -121,12 +132,18 @@ ssize_t read_report_ref(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 ssize_t read_input_report(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                           void *buf, uint16_t len, uint16_t offset)
 {
+    if (get_active_profile_id() == 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
     return bt_gatt_attr_read(conn, attr, buf, len, offset, nullptr, 0);
 }
 
 ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                          const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
+    if (get_active_profile_id() == 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
     auto *value = static_cast<uint8_t *>(attr->user_data);
     if (offset + len > sizeof(ctrl_point)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
@@ -144,9 +161,57 @@ ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 #endif
 
 
+// ─── Custom Config Service Internals ──────────────────────────────
+
+static ConfigMappings g_mappings = {
+    .main_button_single = HidKey::VolumeUp,
+    .main_button_long = HidKey::VolumeUp,
+    .encoder_cw = HidKey::VolumeUp,
+    .encoder_ccw = HidKey::VolumeDown,
+    .encoder_button_short = HidKey::Mute,
+};
+
+static ssize_t read_config(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                           void *buf, uint16_t len, uint16_t offset)
+{
+    if (get_active_profile_id() < 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &g_mappings, sizeof(g_mappings));
+}
+
+static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                            const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    if (get_active_profile_id() < 3) {
+        return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
+    }
+    if (offset + len > sizeof(g_mappings)) {
+        return BT_ATT_ERR_INVALID_OFFSET;
+    }
+    memcpy(((uint8_t *)&g_mappings) + offset, buf, len);
+    
+    // Persist to NVS immediately
+    if (IS_ENABLED(CONFIG_SETTINGS)) {
+        settings_save_one("remote/config/mappings", &g_mappings, sizeof(g_mappings));
+    }
+    
+    printk("Config: mappings updated via BLE and saved to NVS\n");
+    return len;
+}
+
+#define BT_UUID_REMOTE_SERVICE_VAL \
+    BT_UUID_128_ENCODE(0x9e4571a5, 0xb7d9, 0x4daa, 0xa3e5, 0xa8f086007a2b)
+
+#define BT_UUID_REMOTE_CONFIG_CHRC_VAL \
+    BT_UUID_128_ENCODE(0xa427616a, 0xed05, 0x499d, 0x8072, 0x5f329ed64b3b)
+
+static struct bt_uuid_128 remote_svc_uuid = BT_UUID_INIT_128(BT_UUID_REMOTE_SERVICE_VAL);
+static struct bt_uuid_128 config_chrc_uuid = BT_UUID_INIT_128(BT_UUID_REMOTE_CONFIG_CHRC_VAL);
+
+
 } // namespace
 
-/* HID Service Declaration — matches Zephyr peripheral_hids sample */
 BT_GATT_SERVICE_DEFINE(hog_svc,
     BT_GATT_PRIMARY_SERVICE(BT_UUID_HIDS),
     BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_INFO, BT_GATT_CHRC_READ,
@@ -164,6 +229,14 @@ BT_GATT_SERVICE_DEFINE(hog_svc,
                            BT_GATT_CHRC_WRITE_WITHOUT_RESP,
                            BT_GATT_PERM_WRITE,
                            nullptr, write_ctrl_point, &ctrl_point),
+);
+
+BT_GATT_SERVICE_DEFINE(remote_svc,
+    BT_GATT_PRIMARY_SERVICE(&remote_svc_uuid),
+    BT_GATT_CHARACTERISTIC(&config_chrc_uuid.uuid,
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+                           read_config, write_config, &g_mappings),
 );
 
 // ─── Button Handler (Thread-based state machine) ─────────────────
@@ -239,6 +312,12 @@ struct ZephyrHal {
     }
     static void clear_bonds() {
         ::clear_bonds();
+    }
+    static uint8_t get_active_profile() {
+        return get_active_profile_id();
+    }
+    static ConfigMappings get_config_mappings() {
+        return HidService::get_config_mappings();
     }
 };
 
@@ -371,6 +450,16 @@ void HidService::send_key_down(HidKey key)
 void HidService::send_key_up()
 {
     send_hid_report(0x00);
+}
+
+void HidService::set_config_mappings(const ConfigMappings& mappings)
+{
+    g_mappings = mappings;
+}
+
+ConfigMappings HidService::get_config_mappings()
+{
+    return g_mappings;
 }
 
 void HidService::run_button_loop()

@@ -3,7 +3,11 @@
 #include "hog.hpp" // For HidKey
 #include <cstdint>
 #include <cstdlib>
+#ifdef __ZEPHYR__
 #include <zephyr/sys/printk.h>
+#else
+#define printk(...)
+#endif
 
 namespace remote {
 
@@ -20,6 +24,8 @@ namespace remote {
  *     static void led_set_trigger_active(bool active);
  *     static void on_profile_switch();        // called on encoder long-press
  *     static void clear_bonds();              // called on main button 5s hold
+ *     static uint8_t get_active_profile();
+ *     static ConfigMappings get_config_mappings();
  * };
  */
 template <typename Hal>
@@ -64,12 +70,20 @@ public:
                 return;
             }
 
+            uint8_t profile = Hal::get_active_profile();
+            ConfigMappings mappings = Hal::get_config_mappings();
+
             if (burst) {
                 Hal::buzzer_long_beep();
                 Hal::led_set_trigger_active(true);
-                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-                Hal::sleep_ms(kBurstHoldMs);
-                Hal::send_hid_report(0x00);
+                
+                HidKey key = (profile == 3) ? mappings.main_button_long : HidKey::VolumeUp;
+                if (key != HidKey::None) {
+                    Hal::send_hid_report(static_cast<uint8_t>(key));
+                    Hal::sleep_ms(kBurstHoldMs);
+                    Hal::send_hid_report(0x00);
+                }
+
                 Hal::led_set_trigger_active(false);
                 while (Hal::is_button_held()) {
                     Hal::sleep_ms(kPollMs);
@@ -80,9 +94,13 @@ public:
             // If we got here, it was a single click
             Hal::led_set_trigger_active(true);
             Hal::buzzer_beep();
-            Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-            Hal::sleep_ms(100);
-            Hal::send_hid_report(0x00);
+            
+            HidKey key = (profile == 3) ? mappings.main_button_single : HidKey::VolumeUp;
+            if (key != HidKey::None) {
+                Hal::send_hid_report(static_cast<uint8_t>(key));
+                Hal::sleep_ms(100);
+                Hal::send_hid_report(0x00);
+            }
             Hal::led_set_trigger_active(false);
 
             Hal::sleep_ms(kDebounceMs);
@@ -99,16 +117,25 @@ public:
             int sign = (accumulated_degrees > 0) ? 1 : -1;
             accumulated_degrees %= 60;
             
+            uint8_t profile = Hal::get_active_profile();
+            ConfigMappings mappings = Hal::get_config_mappings();
+
             if (sign > 0) {
-                // Hardware positive = Counter-Clockwise (Volume Down)
-                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeDown));
-                Hal::sleep_ms(30);
-                Hal::send_hid_report(0x00);
+                // Hardware positive = Counter-Clockwise
+                HidKey key = (profile == 3) ? mappings.encoder_ccw : HidKey::VolumeDown;
+                if (key != HidKey::None) {
+                    Hal::send_hid_report(static_cast<uint8_t>(key));
+                    Hal::sleep_ms(30);
+                    Hal::send_hid_report(0x00);
+                }
             } else {
-                // Hardware negative = Clockwise (Volume Up)
-                Hal::send_hid_report(static_cast<uint8_t>(HidKey::VolumeUp));
-                Hal::sleep_ms(30);
-                Hal::send_hid_report(0x00);
+                // Hardware negative = Clockwise
+                HidKey key = (profile == 3) ? mappings.encoder_cw : HidKey::VolumeUp;
+                if (key != HidKey::None) {
+                    Hal::send_hid_report(static_cast<uint8_t>(key));
+                    Hal::sleep_ms(30);
+                    Hal::send_hid_report(0x00);
+                }
             }
         }
     }
@@ -134,11 +161,17 @@ public:
             }
         }
 
-        // Short press → mute toggle
-        printk("Encoder Btn: Mute Toggle\n");
-        Hal::send_hid_report(static_cast<uint8_t>(HidKey::Mute));
-        Hal::sleep_ms(50);
-        Hal::send_hid_report(0x00);
+        // Short press
+        uint8_t profile = Hal::get_active_profile();
+        ConfigMappings mappings = Hal::get_config_mappings();
+        
+        HidKey key = (profile == 3) ? mappings.encoder_button_short : HidKey::Mute;
+        if (key != HidKey::None) {
+            printk("Encoder Btn: Triggering mapped key\n");
+            Hal::send_hid_report(static_cast<uint8_t>(key));
+            Hal::sleep_ms(50);
+            Hal::send_hid_report(0x00);
+        }
     }
 };
 

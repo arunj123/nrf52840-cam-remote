@@ -145,6 +145,8 @@ extern "C" void hid_set_conn(struct bt_conn *conn);
 extern "C" void hid_clear_conn();
 extern "C" void hid_disconnect();
 
+
+
 namespace remote {
 
 // ─── NVS-backed StorageHal for ProfileManager ──────────────────
@@ -161,9 +163,11 @@ struct NvsStorageHal {
     }
 
     static std::optional<uint8_t> load(std::string_view key) {
-        char key_str[64];
-        std::snprintf(key_str, sizeof(key_str), "remote/%.*s", static_cast<int>(key.size()), key.data());
         return std::nullopt; // Handled by settings handler
+    }
+
+    static void trigger_save() {
+        settings_save();
     }
 
     static bool store_addr(std::string_view key, const uint8_t* addr) {
@@ -178,7 +182,11 @@ struct NvsStorageHal {
     }
 };
 
-static ProfileManager<NvsStorageHal, 3> profile_mgr;
+static ProfileManager<NvsStorageHal, 4> profile_mgr;
+
+extern "C" uint8_t get_active_profile_id() {
+    return remote::profile_mgr.active_slot();
+}
 
 // ─── Settings Handler ───────────────────────────────────────────
 static int remote_settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
@@ -192,7 +200,7 @@ static int remote_settings_set(const char *name, size_t len, settings_read_cb re
     }
     
     // Handle profile/slotN/addr
-    for (uint8_t i = 0; i < 3; ++i) {
+    for (uint8_t i = 0; i < 4; ++i) {
         char buf[32];
         std::snprintf(buf, sizeof(buf), "profile/slot%u/addr", i);
         if (settings_name_steq(name, buf, &next) && !next) {
@@ -201,6 +209,15 @@ static int remote_settings_set(const char *name, size_t len, settings_read_cb re
                 profile_mgr.set_slot_addr(i, addr);
                 return 0;
             }
+        }
+    }
+
+    // Handle config/mappings
+    if (settings_name_steq(name, "config/mappings", &next) && !next) {
+        ConfigMappings mappings;
+        if (read_cb(cb_arg, &mappings, sizeof(mappings)) > 0) {
+            HidService::set_config_mappings(mappings);
+            return 0;
         }
     }
     return -ENOENT;
@@ -230,19 +247,27 @@ static constexpr uint8_t ad_uuid[] = {
 };
 static constexpr std::string_view dev_name = CONFIG_BT_DEVICE_NAME;
 
-static const std::array<struct bt_data, 3> ad = {{
+// Advertising: HID Mode (Profiles 0-2) — Advertises HIDS and BAS
+static const std::array<struct bt_data, 3> ad_usage = {{
     { .type = BT_DATA_FLAGS, .data_len = sizeof(ad_flags), .data = ad_flags },
     { .type = BT_DATA_UUID16_ALL, .data_len = sizeof(ad_uuid), .data = ad_uuid },
     { .type = BT_DATA_NAME_COMPLETE, .data_len = static_cast<uint8_t>(dev_name.size()), .data = reinterpret_cast<const uint8_t*>(dev_name.data()) },
 }};
 
 static constexpr uint8_t sd_uuid[] = {
-    0xf0, 0xde, 0xbc, 0x9a, 0x78, 0x56, 0x34, 0x12,
-    0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12
+    0x2b, 0x7a, 0x00, 0x86, 0xf0, 0xa8, 0xe5, 0xa3,
+    0xaa, 0x4d, 0xd9, 0xb7, 0xa5, 0x71, 0x45, 0x9e
 };
 
-static const std::array<struct bt_data, 1> sd = {{
+// Advertising: Config Mode (Profile 3) — Advertises Custom Service and BAS
+static constexpr std::string_view config_name = "Cam Config";
+static const std::array<struct bt_data, 2> ad_config = {{
+    { .type = BT_DATA_FLAGS, .data_len = sizeof(ad_flags), .data = ad_flags },
     { .type = BT_DATA_UUID128_ALL, .data_len = sizeof(sd_uuid), .data = sd_uuid },
+}};
+
+static const std::array<struct bt_data, 1> sd_config = {{
+    { .type = BT_DATA_NAME_COMPLETE, .data_len = static_cast<uint8_t>(config_name.size()), .data = reinterpret_cast<const uint8_t*>(config_name.data()) },
 }};
 
 // ─── Advertising watchdog (forward declaration) ─────────────────
@@ -267,15 +292,28 @@ public:
             return err;
         }
 
-        // Register auth callbacks to provide Passkey display (Windows demands MITM)
-        bt_conn_auth_cb_register(&auth_cb);
+        // Register auth callbacks only if authentication is requested
+        if (IS_ENABLED(CONFIG_SAMPLE_BT_USE_AUTHENTICATION)) {
+            bt_conn_auth_cb_register(&auth_cb);
+        }
         return 0;
     }
+    // Advertising parameters for regular HID usage (Fast, Connectable, Scannable)
+    static constexpr struct bt_le_adv_param adv_param_usage = {
+        .id = BT_ID_DEFAULT,
+        .sid = 0,
+        .secondary_max_skip = 0,
+        .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_SCANNABLE,
+        .interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
+        .interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
+        .peer = nullptr,
+    };
 
     static int try_advertising(bool force_undirected = false) {
         auto addr_opt = profile_mgr.active_addr();
-        
-        if (addr_opt && !force_undirected) {
+        bool config_mode = profile_mgr.active_slot() == 3;
+        uint8_t current_slot = profile_mgr.active_slot();
+        if (addr_opt && !force_undirected && !config_mode) {
             bt_addr_le_t target;
             std::memcpy(&target, addr_opt->data(), 7);
             
@@ -298,14 +336,44 @@ public:
             
             return bt_le_adv_start(&param, nullptr, 0, nullptr, 0);
         } else {
-            if (adv_tick_count == 0 || use_directed_adv) {
-                printk("ADV: Undirected advertising (slot %u)\n", profile_mgr.active_slot());
+            // Force stop any previous advertising set before starting a new one
+            // This prevents Identity collisions (-EALREADY / -120) when switching slots.
+            bt_le_adv_stop();
+
+            struct bt_le_adv_param param = adv_param_usage;
+            param.id = current_slot;
+            
+            // Select advertising data based on mode
+            const struct bt_data *ad_to_use;
+            size_t ad_len_to_use;
+            const struct bt_data *sd_to_use = nullptr;
+            size_t sd_len_to_use = 0;
+            
+            if (current_slot < 3) {
+                ad_to_use = ad_usage.data();
+                ad_len_to_use = ad_usage.size();
+            } else {
+                ad_to_use = ad_config.data();
+                ad_len_to_use = ad_config.size();
+                sd_to_use = sd_config.data();
+                sd_len_to_use = sd_config.size();
             }
-            struct bt_le_adv_param param = *BT_LE_ADV_CONN_FAST_1;
-            param.id = profile_mgr.active_slot();
-            return bt_le_adv_start(&param,
-                                   ad.data(), ad.size(),
-                                   sd.data(), sd.size());
+
+            // Print identity address for debugging
+            bt_addr_le_t id_addr;
+            size_t count = 1;
+            bt_id_get(&id_addr, &count);
+            char addr_str[BT_ADDR_LE_STR_LEN];
+            bt_addr_le_to_str(&id_addr, addr_str, sizeof(addr_str));
+            printk("ADV: start slot %d using ID addr %s\n", current_slot, addr_str);
+
+            int err = bt_le_adv_start(&param,
+                                   ad_to_use, ad_len_to_use,
+                                   sd_to_use, sd_len_to_use);
+            if (err && err != -EALREADY) {
+                printk("ADV: start failed (err %d) for slot %u\n", err, current_slot);
+            }
+            return err;
         }
     }
 
@@ -348,7 +416,7 @@ private:
 
         size_t id_count = 0;
         bt_id_get(nullptr, &id_count);
-        while (id_count < 3) {
+        while (id_count < 4) {
             int new_id = bt_id_create(nullptr, nullptr);
             if (new_id < 0) {
                 printk("Failed to create BT ID (err %d)\n", new_id);
@@ -386,9 +454,9 @@ private:
         LedController::set_connected(true);
         LedController::set_advertising(false);
 
-        if (int sec_err = bt_conn_set_security(conn, BT_SECURITY_L2); sec_err < 0) {
-            printk("Failed to set security (err %d)\n", sec_err);
-        }
+        // We stop initiating security from the nRF side.
+        // Windows and Web Bluetooth will request it automatically when they access 
+        // encrypted characteristics. This avoids races with the Windows HID driver.
     }
 
     static void disconnected(struct bt_conn *conn, uint8_t reason) {
@@ -483,15 +551,14 @@ static void adv_watchdog_handler(struct k_work *work)
         bt_le_adv_stop(); // Force restart in new mode
     }
 
-    // IDENTITY SWITCH DETECTION: If the profile changed while we were advertising, 
-    // we MUST stop and restart to apply the new identity/bonds.
+    // Force identity switch if needed (Restart if Slot or Mode changed)
     if (is_advertising && (current_id != last_adv_id || should_be_directed != last_adv_mode_directed)) {
         printk("ADV watchdog: Profile/Mode changed (%d -> %d), restarting adv\n", last_adv_id, current_id);
         bt_le_adv_stop();
         is_advertising = false;
     }
 
-    // Try to start advertising (will return -EALREADY if already running)
+    // Try to start advertising
     int err = BluetoothManager::try_advertising(!should_be_directed);
 
     if (err == 0 || err == -EALREADY) {
@@ -513,21 +580,35 @@ static void adv_watchdog_handler(struct k_work *work)
 }
 
 extern "C" void clear_bonds() {
-    printk("REL: Clearing bonds for active slot %u\n", profile_mgr.active_slot());
+    uint8_t id = profile_mgr.active_slot();
+    printk("REL: Clearing bonds and ROTATING identity address for slot %u\n", id);
     
-    // Clear pairing info from BLE stack only for the active slot
-    bt_unpair(profile_mgr.active_slot(), NULL);
+    // 1. Unpair
+    bt_unpair(id, NULL);
+
+    // 2. Stop everything and disconnect
+    bt_le_adv_stop();
+    is_advertising = false;
+    hid_disconnect();
     
-    // Reset our profile manager
+    // 3. Delete and re-create identity (IDs > 0) to change the random address
+    // This forces Windows to see it as a brand new device.
+    if (id > 0) {
+        bt_id_delete(id);
+        int new_id = bt_id_create(nullptr, nullptr);
+        if (new_id < 0) {
+            printk("Failed to re-create BT ID (err %d)\n", new_id);
+        } else {
+            printk("Re-created BT ID %d for slot %u\n", new_id, id);
+        }
+    }
+    
+    // Reset our profile manager internal state
     profile_mgr.clear_active();
     
     // Visual/Audio feedback
     BuzzerController::countdown_beep();
     
-    // Force disconnect and restart advertising
-    bt_le_adv_stop();
-    is_advertising = false;
-    hid_disconnect();
     adv_tick_count = 0;
     use_directed_adv = false; // Start with undirected to be seen
     

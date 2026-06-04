@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Remote Configurator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --bg: #0f172a;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --accent: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(16, 185, 129, 0.1) 0, transparent 50%);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(to right, #818cf8, #34d399);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .status-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 2rem;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 12px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ef4444;
+            box-shadow: 0 0 10px #ef4444;
+        }
+
+        .status-dot.connected {
+            background-color: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+        }
+
+        .config-grid {
+            display: grid;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.75rem;
+            color: var(--text);
+            font-size: 1rem;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        select:focus {
+            border-color: var(--primary);
+        }
+
+        button {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 12px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        #btn-connect {
+            background: var(--primary);
+            color: white;
+            margin-bottom: 1rem;
+        }
+
+        #btn-connect:hover {
+            background: var(--primary-hover);
+            transform: scale(1.02);
+        }
+
+        #btn-save {
+            background: var(--accent);
+            color: white;
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        #btn-save.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #btn-save:hover {
+            filter: brightness(1.1);
+            transform: scale(1.02);
+        }
+
+        .footer {
+            margin-top: 2rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .card {
+            animation: fadeIn 0.8s ease-out;
+        }
+    </style>
+</head>
+<body>
+    <h1>Remote Control</h1>
+    <p class="subtitle">Slot 3: Configuration Mode</p>
+
+    <div class="card">
+        <div class="status-container">
+            <div id="status-dot" class="status-dot"></div>
+            <span id="status-text">Disconnected</span>
+        </div>
+
+        <button id="btn-connect">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
+            Connect to Device
+        </button>
+
+        <div class="config-grid">
+            <div class="field">
+                <label>Main Button Single Click</label>
+                <select id="map-single">
+                    <option value="0">None</option>
+                    <option value="1" selected>Volume Up (Shutter)</option>
+                    <option value="2">Volume Down</option>
+                    <option value="4">Mute</option>
+                    <option value="8">Play / Pause</option>
+                    <option value="16">Next Track</option>
+                    <option value="32">Prev Track</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label>Main Button Long Press</label>
+                <select id="map-long">
+                    <option value="0">None</option>
+                    <option value="1" selected>Volume Up (Burst)</option>
+                    <option value="2">Volume Down</option>
+                    <option value="4">Mute</option>
+                    <option value="8">Play / Pause</option>
+                    <option value="16">Next Track</option>
+                    <option value="32">Prev Track</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label>Encoder Clockwise</label>
+                <select id="map-cw">
+                    <option value="0">None</option>
+                    <option value="1" selected>Volume Up</option>
+                    <option value="2">Volume Down</option>
+                    <option value="4">Mute</option>
+                    <option value="8">Play / Pause</option>
+                    <option value="16">Next Track</option>
+                    <option value="32">Prev Track</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label>Encoder Counter-Clockwise</label>
+                <select id="map-ccw">
+                    <option value="0">None</option>
+                    <option value="1">Volume Up</option>
+                    <option value="2" selected>Volume Down</option>
+                    <option value="4">Mute</option>
+                    <option value="8">Play / Pause</option>
+                    <option value="16">Next Track</option>
+                    <option value="32">Prev Track</option>
+                </select>
+            </div>
+
+            <div class="field">
+                <label>Encoder Button Short Press</label>
+                <select id="map-encbtn">
+                    <option value="0">None</option>
+                    <option value="1">Volume Up</option>
+                    <option value="2">Volume Down</option>
+                    <option value="4" selected>Mute</option>
+                    <option value="8">Play / Pause</option>
+                    <option value="16">Next Track</option>
+                    <option value="32">Prev Track</option>
+                </select>
+            </div>
+        </div>
+
+        <button id="btn-save">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v13a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Save Configuration
+        </button>
+    </div>
+
+    <div class="footer">
+        nRF52840 Camera Remote • Web Bluetooth Configurator
+    </div>
+
+    <script>
+        const SERVICE_UUID = '9e4571a5-b7d9-4daa-a3e5-a8f086007a2b';
+        const CONFIG_UUID = 'a427616a-ed05-499d-8072-5f329ed64b3b';
+
+        let device = null;
+        let configChar = null;
+
+        const btnConnect = document.getElementById('btn-connect');
+        const btnSave = document.getElementById('btn-save');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+
+        const selects = {
+            single: document.getElementById('map-single'),
+            long: document.getElementById('map-long'),
+            cw: document.getElementById('map-cw'),
+            ccw: document.getElementById('map-ccw'),
+            encbtn: document.getElementById('map-encbtn')
+        };
+
+        btnConnect.addEventListener('click', async () => {
+            try {
+                statusText.innerText = "Requesting device...";
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { namePrefix: 'Cam Config', services: [SERVICE_UUID] }
+                    ],
+                    optionalServices: [SERVICE_UUID]
+                });
+
+                statusText.innerText = "Connecting...";
+                const server = await device.gatt.connect();
+                
+                // Crucial delay: give Windows HID driver time to settle before we retrieve services
+                statusText.innerText = "Waiting for driver handover...";
+                await new Promise(r => setTimeout(r, 2500));
+
+                let service;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        statusText.innerText = `Getting service (attempt ${attempt})...`;
+                        service = await server.getPrimaryService(SERVICE_UUID);
+                        break; 
+                    } catch (e) {
+                        if (attempt === 2) throw e;
+                        statusText.innerText = "Service search failed, retrying...";
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+
+                statusText.innerText = "Getting characteristic...";
+                configChar = await service.getCharacteristic(CONFIG_UUID);
+
+                // Read current config
+                try {
+                    const value = await configChar.readValue();
+                    if (value.byteLength >= 5) {
+                        selects.single.value = value.getUint8(0);
+                        selects.long.value = value.getUint8(1);
+                        selects.cw.value = value.getUint8(2);
+                        selects.ccw.value = value.getUint8(3);
+                        selects.encbtn.value = value.getUint8(4);
+                    }
+                } catch (e) {
+                    console.log("Could not read current config (maybe first run)", e);
+                }
+
+                statusDot.classList.add('connected');
+                statusText.innerText = "Connected: " + device.name;
+                btnConnect.style.display = 'none';
+                btnSave.classList.add('active');
+
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "Error: " + error.message;
+            }
+        });
+
+        function onDisconnected() {
+            statusDot.classList.remove('connected');
+            statusText.innerText = "Disconnected";
+            btnConnect.style.display = 'flex';
+            btnSave.classList.remove('active');
+            device = null;
+            configChar = null;
+        }
+
+        btnSave.addEventListener('click', async () => {
+            if (!configChar) return;
+
+            try {
+                const data = new Uint8Array([
+                    parseInt(selects.single.value),
+                    parseInt(selects.long.value),
+                    parseInt(selects.cw.value),
+                    parseInt(selects.ccw.value),
+                    parseInt(selects.encbtn.value)
+                ]);
+
+                await configChar.writeValue(data);
+                alert("Configuration saved successfully!");
+            } catch (error) {
+                console.error(error);
+                alert("Error saving configuration: " + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
