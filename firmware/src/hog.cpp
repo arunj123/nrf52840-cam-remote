@@ -252,6 +252,7 @@ const struct gpio_dt_spec btn_p7 = GPIO_DT_SPEC_GET(DT_NODELABEL(button2), gpios
 const struct device *const qdec_dev = DEVICE_DT_GET(DT_NODELABEL(qdec0));
 
 // ─── Connection tracking ────────────────────────────────────────
+K_MUTEX_DEFINE(conn_mutex);
 volatile struct bt_conn *active_conn = nullptr;
 
 // ─── Timing ─────────────────────────────────────────────────────
@@ -259,7 +260,6 @@ constexpr int kPollMs = 20;
 constexpr int kDebounceMs = 60;
 constexpr int kLongPressMs = 800;
 constexpr int kBurstHoldMs = 2000;
-constexpr int kEncoderPollMs = 50;
 
 // ─── Button synchronization ─────────────────────────────────────
 K_SEM_DEFINE(btn_sem, 0, 1);
@@ -271,16 +271,19 @@ static struct gpio_callback btn_p7_cb_data;
 // ─── HID report (only sends if connected) ───────────────────────
 static void send_hid_report(uint8_t key_bits)
 {
-    struct bt_conn *conn = (struct bt_conn *)active_conn;
+    struct bt_conn *conn = nullptr;
+    k_mutex_lock(&conn_mutex, K_FOREVER);
+    if (active_conn) {
+        conn = bt_conn_ref((struct bt_conn *)active_conn);
+    }
+    k_mutex_unlock(&conn_mutex);
+
     if (!conn) {
         return;
     }
     bt_gatt_notify(conn, &hog_svc.attrs[6], &key_bits, sizeof(key_bits));
+    bt_conn_unref(conn);
 }
-
-// ─── Encoder Polling Timer ──────────────────────────────────────
-static void encoder_timer_handler(struct k_timer *timer_id);
-K_TIMER_DEFINE(encoder_timer, encoder_timer_handler, NULL);
 
 struct ZephyrHal {
     static uint64_t get_time_ms() {
@@ -323,12 +326,11 @@ struct ZephyrHal {
 
 using Engine = GestureEngine<ZephyrHal>;
 
-static void encoder_timer_handler(struct k_timer *timer_id)
+// ─── QDEC Sensor Trigger ────────────────────────────────────────
+static void qdec_trigger_handler(const struct device *dev, const struct sensor_trigger *trigger)
 {
-    if (!active_conn || !device_is_ready(qdec_dev)) return;
-
     struct sensor_value val;
-    if (sensor_sample_fetch(qdec_dev) == 0 && sensor_channel_get(qdec_dev, SENSOR_CHAN_ROTATION, &val) == 0) {
+    if (sensor_sample_fetch(dev) == 0 && sensor_channel_get(dev, SENSOR_CHAN_ROTATION, &val) == 0) {
         if (val.val1 != 0) {
             printk("Woke up (Encoder)!\n");
             Engine::on_encoder_rotate(val.val1);
@@ -336,6 +338,11 @@ static void encoder_timer_handler(struct k_timer *timer_id)
         }
     }
 }
+
+static struct sensor_trigger qdec_trig = {
+    .type = SENSOR_TRIG_DATA_READY,
+    .chan = SENSOR_CHAN_ROTATION,
+};
 
 static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
@@ -391,27 +398,58 @@ void encoder_button_thread(void *, void *, void *)
 
 extern "C" void hid_set_conn(struct bt_conn *conn)
 {
+    k_mutex_lock(&conn_mutex, K_FOREVER);
     active_conn = bt_conn_ref(conn);
+    k_mutex_unlock(&conn_mutex);
     printk("HID: conn set\n");
-    k_timer_start(&encoder_timer, K_MSEC(kEncoderPollMs), K_MSEC(kEncoderPollMs));
+
+    if (device_is_ready(qdec_dev)) {
+        int err = sensor_trigger_set(qdec_dev, &qdec_trig, qdec_trigger_handler);
+        if (err) {
+            printk("QDEC: failed to set trigger (err %d)\n", err);
+        } else {
+            printk("QDEC: trigger registered\n");
+        }
+    }
 }
 
 extern "C" void hid_disconnect()
 {
+    struct bt_conn *conn = nullptr;
+    k_mutex_lock(&conn_mutex, K_FOREVER);
     if (active_conn) {
+        conn = bt_conn_ref((struct bt_conn *)active_conn);
+    }
+    k_mutex_unlock(&conn_mutex);
+
+    if (conn) {
         printk("HID: disconnecting...\n");
-        bt_conn_disconnect((struct bt_conn *)active_conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+        bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+        bt_conn_unref(conn);
     }
 }
 
 extern "C" void hid_clear_conn()
 {
+    struct bt_conn *old_conn = nullptr;
+    k_mutex_lock(&conn_mutex, K_FOREVER);
     if (active_conn) {
-        bt_conn_unref((struct bt_conn *)active_conn);
+        old_conn = (struct bt_conn *)active_conn;
         active_conn = nullptr;
     }
+    k_mutex_unlock(&conn_mutex);
+
+    if (old_conn) {
+        bt_conn_unref(old_conn);
+    }
     printk("HID: conn cleared\n");
-    k_timer_stop(&encoder_timer);
+
+    if (device_is_ready(qdec_dev)) {
+        int err = sensor_trigger_set(qdec_dev, &qdec_trig, nullptr);
+        if (err) {
+            printk("QDEC: failed to clear trigger (err %d)\n", err);
+        }
+    }
 }
 
 // ─── Public API ──────────────────────────────────────────────────
