@@ -7,6 +7,8 @@ using remote::millivolts_to_percent;
 // ─── Compile-time sanity checks (constexpr verification) ────────
 
 static_assert(raw_to_millivolts(0) == 0, "Zero raw should be 0 mV");
+static_assert(raw_to_millivolts(312) == 4189, "Calibration point raw=312 should map to 4189 mV");
+static_assert(raw_to_millivolts(INT16_MAX) == 54986, "Oversized raw should clamp to 12-bit max");
 static_assert(millivolts_to_percent(0) == 0, "0 mV should be 0%");
 static_assert(millivolts_to_percent(4200) == 100, "4200 mV should be 100%");
 
@@ -18,9 +20,15 @@ TEST_F(RawToMillivoltsTest, ZeroRawReturnsZero) {
     EXPECT_EQ(raw_to_millivolts(0), 0);
 }
 
-TEST_F(RawToMillivoltsTest, MaxRawReturnsFullScale) {
-    // 10-bit ADC max = 1023 → should be close to 3600 mV
-    EXPECT_EQ(raw_to_millivolts(1023), 3596);
+TEST_F(RawToMillivoltsTest, CalibratedBatteryPoint) {
+    // 12-bit calibrated formula: (312 * 55000) / 4096 = 4189 mV (~4.2V full Li-Po)
+    EXPECT_EQ(raw_to_millivolts(312), 4189);
+}
+
+TEST_F(RawToMillivoltsTest, Max12BitRawAndOverflowClamping) {
+    // 12-bit ADC max = 4095 -> (4095 * 55000) / 4096 = 54986 mV
+    EXPECT_EQ(raw_to_millivolts(4095), 54986);
+    EXPECT_EQ(raw_to_millivolts(INT16_MAX), 54986);
 }
 
 TEST_F(RawToMillivoltsTest, NegativeRawClampedToZero) {
@@ -30,8 +38,8 @@ TEST_F(RawToMillivoltsTest, NegativeRawClampedToZero) {
 }
 
 TEST_F(RawToMillivoltsTest, MidRangeValue) {
-    // 512 / 1024 * 3600 = 1800 mV
-    EXPECT_EQ(raw_to_millivolts(512), 1800);
+    // (256 * 55000) / 4096 = 3437 mV
+    EXPECT_EQ(raw_to_millivolts(256), 3437);
 }
 
 // ─── millivolts_to_percent Tests ────────────────────────────────

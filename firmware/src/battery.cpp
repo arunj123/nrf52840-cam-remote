@@ -34,6 +34,7 @@ static struct adc_sequence sequence = {
     .buffer = &adc_buf,
     .buffer_size = sizeof(adc_buf),
     .resolution = kAdcResolution,
+    .oversampling = DT_PROP_OR(DT_CHILD(DT_NODELABEL(adc), channel_0), zephyr_oversampling, 0),
 };
 
 // ─── Periodic update timer ──────────────────────────────────────

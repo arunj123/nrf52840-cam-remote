@@ -1,0 +1,169 @@
+/*
+ * Overlay for Adafruit Feather / Nice!Nano / Pro Micro nRF52840 (NCS v2.8.0)
+ * Maps Pro Micro nRF52840 Cam Remote hardware pins onto Feather nRF52840 UF2 base.
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/ {
+	/delete-node/ vbatt;
+
+	chosen {
+		sw0 = &button0;
+		buzzer = &pwm_buzzer0;
+		qdec0 = &qdec0;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		/delete-node/ led_1;
+
+		led_red: led_0 {
+			/* Physical onboard LED on Tenstar/Supermini/Nice!Nano boards */
+			gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+			label = "Red LED";
+		};
+
+		vcc_rail: vcc_rail {
+			/* Physical P0.13 controls the 3.3V rail for peripherals */
+			gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
+			label = "External VCC Rail Control";
+		};
+	};
+
+	aliases {
+		/delete-property/ led1;
+		led0 = &led_red;
+		sw0 = &button0;
+		sw1 = &button2;
+		buzzer = &pwm_buzzer0;
+		qdec0 = &qdec0;
+		vcc-rail = &vcc_rail;
+	};
+
+	pwm_buzzers {
+		compatible = "pwm-leds";
+		pwm_buzzer0: pwm_buzzer_0 {
+			pwms = <&pwm0 0 PWM_HZ(4000) PWM_POLARITY_NORMAL>;
+			label = "PWM Buzzer";
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+		button0: button_0 {
+			gpios = <&gpio0 20 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; /* D5 -> P0.20 */
+			label = "Trigger 1";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+		button1: button_1 {
+			gpios = <&gpio0 17 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; /* D4 -> P0.17 */
+			label = "Trigger 2";
+			zephyr,code = <INPUT_KEY_1>;
+		};
+		button2: button_2 {
+			gpios = <&gpio0 24 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>; /* D7 -> P0.24 */
+			label = "Encoder Mute";
+			zephyr,code = <INPUT_KEY_2>;
+		};
+	};
+};
+
+&reg1 {
+	/* Nice!Nano / SuperMini clones often omit DCDC inductors; force LDO mode */
+	regulator-initial-mode = <NRF5X_REG_MODE_LDO>;
+};
+
+&uicr {
+	/* Required so P0.10 (NFC2 / D2) operates as GPIO for QDEC Phase A */
+	nfct-pins-as-gpios;
+};
+
+/* Disable Feather default peripherals that conflict with Cam Remote pins */
+&uart0 {
+	status = "disabled";
+};
+
+&i2c0 {
+	status = "disabled";
+};
+
+&spi1 {
+	status = "disabled";
+};
+
+&qspi {
+	status = "disabled";
+};
+
+&gd25q16 {
+	status = "disabled";
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN5>; /* Battery Sense (P0.29) */
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <4>; /* 16x oversampling (2^4) */
+	};
+};
+
+&qdec0 {
+	status = "okay";
+	pinctrl-0 = <&qdec_default>;
+	pinctrl-1 = <&qdec_sleep>;
+	pinctrl-names = "default", "sleep";
+	steps = <24>;
+	led-pre = <0>;
+};
+
+&pwm0 {
+	status = "okay";
+	pinctrl-0 = <&pwm0_default_buzzer>;
+	pinctrl-1 = <&pwm0_sleep_buzzer>;
+	pinctrl-names = "default", "sleep";
+};
+
+&pinctrl {
+	pwm0_default_buzzer: pwm0_default_buzzer {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 22)>; /* D6 -> P0.22 */
+			nordic,drive-mode = <NRF_DRIVE_H0H1>;
+		};
+	};
+
+	pwm0_sleep_buzzer: pwm0_sleep_buzzer {
+		group1 {
+			psels = <NRF_PSEL(PWM_OUT0, 0, 22)>;
+			low-power-enable;
+		};
+	};
+
+	qdec_default: qdec_default {
+		group1 {
+			psels = <NRF_PSEL(QDEC_A, 0, 10)>,  /* D2 -> P0.10 */
+				<NRF_PSEL(QDEC_B, 1, 11)>;  /* D3 -> P1.11 */
+			bias-pull-up;
+		};
+	};
+
+	qdec_sleep: qdec_sleep {
+		group1 {
+			psels = <NRF_PSEL(QDEC_A, 0, 10)>,
+				<NRF_PSEL(QDEC_B, 1, 11)>;
+			bias-pull-up;
+			low-power-enable;
+		};
+	};
+};

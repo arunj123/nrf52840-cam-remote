@@ -22,7 +22,9 @@ inline constexpr uint16_t kAdcResolution = 12;
 ///   mV = raw * 3600 / 4096 * divider_ratio
 /// Calibrated so that raw≈312 (12-bit) → 4210mV.
 constexpr uint16_t raw_to_millivolts(int16_t raw) noexcept {
+    constexpr int16_t kMaxRaw = (1 << kAdcResolution) - 1;
     if (raw < 0) raw = 0;
+    if (raw > kMaxRaw) raw = kMaxRaw;
     return static_cast<uint16_t>(
         (static_cast<uint32_t>(raw) * 55000) / (1 << kAdcResolution)
     );

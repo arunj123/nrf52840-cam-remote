@@ -35,6 +35,13 @@ public:
     static constexpr int kDebounceMs = 60;
     static constexpr int kLongPressMs = 800;
     static constexpr int kBurstHoldMs = 2000;
+    static constexpr int kResetHoldMs = 5000;
+    static constexpr int kDegreesPerDetent = 60;
+    static constexpr int kMaxStepsPerReport = 10;
+
+    static void reset() {
+        accumulated_degrees_ = 0;
+    }
 
     // Called when the main button semaphore is triggered
     static void on_main_button_wake() {
@@ -55,7 +62,7 @@ public:
                 Hal::sleep_ms(kPollMs);
                 uint64_t duration = Hal::get_time_ms() - t0;
                 
-                if (duration >= 5000) { // 5 seconds reset
+                if (duration >= kResetHoldMs) { // 5 seconds reset
                     reset_req = true;
                     break;
                 }
@@ -70,14 +77,13 @@ public:
                 return;
             }
 
-            uint8_t profile = Hal::get_active_profile();
-            ConfigMappings mappings = Hal::get_config_mappings();
+            const ConfigMappings mappings = Hal::get_config_mappings();
 
             if (burst) {
                 Hal::buzzer_long_beep();
                 Hal::led_set_trigger_active(true);
                 
-                HidKey key = (profile == 3) ? mappings.main_button_long : HidKey::VolumeUp;
+                const HidKey key = mappings.main_button_long;
                 if (key != HidKey::None) {
                     Hal::send_hid_report(static_cast<uint8_t>(key));
                     Hal::sleep_ms(kBurstHoldMs);
@@ -95,7 +101,7 @@ public:
             Hal::led_set_trigger_active(true);
             Hal::buzzer_beep();
             
-            HidKey key = (profile == 3) ? mappings.main_button_single : HidKey::VolumeUp;
+            const HidKey key = mappings.main_button_single;
             if (key != HidKey::None) {
                 Hal::send_hid_report(static_cast<uint8_t>(key));
                 Hal::sleep_ms(100);
@@ -107,35 +113,24 @@ public:
         }
     }
 
-    // Called from encoder polling timer when rotation is detected
+    // Called from encoder thread when rotation is detected
     // Note: For this hardware combo, each physical detent generates 60 degrees.
     static void on_encoder_rotate(int steps) {
-        static int accumulated_degrees = 0;
-        accumulated_degrees += steps;
+        accumulated_degrees_ += steps;
 
-        if (abs(accumulated_degrees) >= 60) {
-            int sign = (accumulated_degrees > 0) ? 1 : -1;
-            accumulated_degrees %= 60;
-            
-            uint8_t profile = Hal::get_active_profile();
-            ConfigMappings mappings = Hal::get_config_mappings();
+        const ConfigMappings mappings = Hal::get_config_mappings();
+        int emitted = 0;
+        while (std::abs(accumulated_degrees_) >= kDegreesPerDetent && emitted < kMaxStepsPerReport) {
+            const int sign = (accumulated_degrees_ > 0) ? 1 : -1;
+            accumulated_degrees_ -= sign * kDegreesPerDetent;
+            ++emitted;
 
-            if (sign > 0) {
-                // Hardware positive = Counter-Clockwise
-                HidKey key = (profile == 3) ? mappings.encoder_ccw : HidKey::VolumeDown;
-                if (key != HidKey::None) {
-                    Hal::send_hid_report(static_cast<uint8_t>(key));
-                    Hal::sleep_ms(30);
-                    Hal::send_hid_report(0x00);
-                }
-            } else {
-                // Hardware negative = Clockwise
-                HidKey key = (profile == 3) ? mappings.encoder_cw : HidKey::VolumeUp;
-                if (key != HidKey::None) {
-                    Hal::send_hid_report(static_cast<uint8_t>(key));
-                    Hal::sleep_ms(30);
-                    Hal::send_hid_report(0x00);
-                }
+            // Hardware positive = Counter-Clockwise, negative = Clockwise
+            const HidKey key = (sign > 0) ? mappings.encoder_ccw : mappings.encoder_cw;
+            if (key != HidKey::None) {
+                Hal::send_hid_report(static_cast<uint8_t>(key));
+                Hal::sleep_ms(30);
+                Hal::send_hid_report(0x00);
             }
         }
     }
@@ -162,10 +157,8 @@ public:
         }
 
         // Short press
-        uint8_t profile = Hal::get_active_profile();
-        ConfigMappings mappings = Hal::get_config_mappings();
-        
-        HidKey key = (profile == 3) ? mappings.encoder_button_short : HidKey::Mute;
+        const ConfigMappings mappings = Hal::get_config_mappings();
+        const HidKey key = mappings.encoder_button_short;
         if (key != HidKey::None) {
             printk("Encoder Btn: Triggering mapped key\n");
             Hal::send_hid_report(static_cast<uint8_t>(key));
@@ -173,6 +166,9 @@ public:
             Hal::send_hid_report(0x00);
         }
     }
+
+private:
+    static inline int accumulated_degrees_{0};
 };
 
 } // namespace remote

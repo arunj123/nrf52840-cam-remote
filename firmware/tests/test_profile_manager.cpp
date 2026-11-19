@@ -206,3 +206,26 @@ TEST_F(ProfileManagerTest, EmptySlotReturnsNullopt) {
     mgr.init();
     EXPECT_FALSE(mgr.get_addr(0).has_value());
 }
+
+TEST_F(ProfileManagerTest, ClearActiveRemovesBond) {
+    mgr.init();
+    uint8_t addr[7] = {0x01, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    mgr.update_active_addr(addr);
+    ASSERT_TRUE(mgr.active_addr().has_value());
+
+    mgr.clear_active();
+    EXPECT_FALSE(mgr.active_addr().has_value());
+}
+
+TEST_F(ProfileManagerTest, SetSlotAddrIgnoresAllZeroAddress) {
+    mgr.init();
+    uint8_t zero[7] = {0};
+    mgr.set_slot_addr(1, zero);
+    EXPECT_FALSE(mgr.get_addr(1).has_value());
+}
+
+TEST_F(ProfileManagerTest, InitIgnoresZeroedStoredAddress) {
+    storage.addr_storage["profile/slot1/addr"] = {0};
+    mgr.init();
+    EXPECT_FALSE(mgr.get_addr(1).has_value());
+}

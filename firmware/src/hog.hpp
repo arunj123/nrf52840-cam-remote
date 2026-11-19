@@ -27,6 +27,7 @@ struct ConfigMappings {
     HidKey encoder_ccw;
     HidKey encoder_button_short;
 };
+static_assert(sizeof(ConfigMappings) == 5, "ConfigMappings must be 5 bytes for BLE/NVS layout");
 
 class HidService {
 public:

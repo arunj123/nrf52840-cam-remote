@@ -1,6 +1,8 @@
 # Build directories
 firmware/build/
+firmware/build_*/
 firmware/build_host/
+firmware/build_host_win/
 firmware/build_nrf52840_mdk/
 firmware/build_promicro_nrf52840/
 firmware/build_promicro_nrf52840_nrf52840_uf2/

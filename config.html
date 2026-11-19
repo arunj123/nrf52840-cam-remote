@@ -175,6 +175,18 @@
             transform: scale(1.02);
         }
 
+        #btn-disconnect {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            margin-top: 0.75rem;
+            display: none;
+        }
+
+        #btn-disconnect:hover {
+            background: rgba(239, 68, 68, 0.35);
+        }
+
         .footer {
             margin-top: 2rem;
             font-size: 0.75rem;
@@ -278,6 +290,10 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v13a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
             Save Configuration
         </button>
+
+        <button id="btn-disconnect">
+            Disconnect
+        </button>
     </div>
 
     <div class="footer">
@@ -293,6 +309,7 @@
 
         const btnConnect = document.getElementById('btn-connect');
         const btnSave = document.getElementById('btn-save');
+        const btnDisconnect = document.getElementById('btn-disconnect');
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
 
@@ -355,6 +372,7 @@
                 statusText.innerText = "Connected: " + device.name;
                 btnConnect.style.display = 'none';
                 btnSave.classList.add('active');
+                btnDisconnect.style.display = 'flex';
 
                 device.addEventListener('gattserverdisconnected', onDisconnected);
 
@@ -369,14 +387,24 @@
             statusText.innerText = "Disconnected";
             btnConnect.style.display = 'flex';
             btnSave.classList.remove('active');
+            btnDisconnect.style.display = 'none';
             device = null;
             configChar = null;
         }
+
+        btnDisconnect.addEventListener('click', () => {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+            } else {
+                onDisconnected();
+            }
+        });
 
         btnSave.addEventListener('click', async () => {
             if (!configChar) return;
 
             try {
+                statusText.innerText = "Saving configuration...";
                 const data = new Uint8Array([
                     parseInt(selects.single.value),
                     parseInt(selects.long.value),
@@ -385,11 +413,15 @@
                     parseInt(selects.encbtn.value)
                 ]);
 
-                await configChar.writeValue(data);
-                alert("Configuration saved successfully!");
+                if (configChar.writeValueWithResponse) {
+                    await configChar.writeValueWithResponse(data);
+                } else {
+                    await configChar.writeValue(data);
+                }
+                statusText.innerText = "Configuration saved!";
             } catch (error) {
                 console.error(error);
-                alert("Error saving configuration: " + error.message);
+                statusText.innerText = "Error saving configuration: " + error.message;
             }
         });
     </script>

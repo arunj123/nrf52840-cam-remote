@@ -135,7 +135,8 @@ ssize_t read_input_report(struct bt_conn *conn, const struct bt_gatt_attr *attr,
     if (get_active_profile_id() == 3) {
         return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
     }
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, nullptr, 0);
+    static constexpr uint8_t empty_report = 0x00;
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &empty_report, sizeof(empty_report));
 }
 
 ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -163,6 +164,8 @@ ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 
 // ─── Custom Config Service Internals ──────────────────────────────
 
+K_MUTEX_DEFINE(config_mutex);
+
 static ConfigMappings g_mappings = {
     .main_button_single = HidKey::VolumeUp,
     .main_button_long = HidKey::VolumeUp,
@@ -177,23 +180,39 @@ static ssize_t read_config(struct bt_conn *conn, const struct bt_gatt_attr *attr
     if (get_active_profile_id() < 3) {
         return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
     }
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &g_mappings, sizeof(g_mappings));
+    k_mutex_lock(&config_mutex, K_FOREVER);
+    const ConfigMappings snapshot = g_mappings;
+    k_mutex_unlock(&config_mutex);
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &snapshot, sizeof(snapshot));
 }
 
 static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                             const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(flags);
     if (get_active_profile_id() < 3) {
         return BT_GATT_ERR(BT_ATT_ERR_NOT_SUPPORTED);
     }
     if (offset + len > sizeof(g_mappings)) {
-        return BT_ATT_ERR_INVALID_OFFSET;
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-    memcpy(((uint8_t *)&g_mappings) + offset, buf, len);
+    const auto *bytes = static_cast<const uint8_t *>(buf);
+    for (uint16_t i = 0; i < len; ++i) {
+        if ((bytes[i] & ~0x3FU) != 0) {
+            return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+        }
+    }
+
+    k_mutex_lock(&config_mutex, K_FOREVER);
+    memcpy(reinterpret_cast<uint8_t *>(&g_mappings) + offset, buf, len);
+    const ConfigMappings updated = g_mappings;
+    k_mutex_unlock(&config_mutex);
     
     // Persist to NVS immediately
     if (IS_ENABLED(CONFIG_SETTINGS)) {
-        settings_save_one("remote/config/mappings", &g_mappings, sizeof(g_mappings));
+        settings_save_one("remote/config/mappings", &updated, sizeof(updated));
     }
     
     printk("Config: mappings updated via BLE and saved to NVS\n");
@@ -255,26 +274,25 @@ const struct device *const qdec_dev = DEVICE_DT_GET(DT_NODELABEL(qdec0));
 K_MUTEX_DEFINE(conn_mutex);
 volatile struct bt_conn *active_conn = nullptr;
 
-// ─── Timing ─────────────────────────────────────────────────────
-constexpr int kPollMs = 20;
-constexpr int kDebounceMs = 60;
-constexpr int kLongPressMs = 800;
-constexpr int kBurstHoldMs = 2000;
-
-// ─── Button synchronization ─────────────────────────────────────
+// ─── Button & Encoder synchronization ───────────────────────────
 K_SEM_DEFINE(btn_sem, 0, 1);
 K_SEM_DEFINE(enc_btn_sem, 0, 1);
+K_SEM_DEFINE(enc_rot_sem, 0, 1);
 static struct gpio_callback btn_p5_cb_data;
 static struct gpio_callback btn_p4_cb_data;
 static struct gpio_callback btn_p7_cb_data;
 
-// ─── HID report (only sends if connected) ───────────────────────
+// ─── HID report (only sends if connected and in HID profile) ───
 static void send_hid_report(uint8_t key_bits)
 {
+    if (get_active_profile_id() == 3) {
+        return;
+    }
+
     struct bt_conn *conn = nullptr;
     k_mutex_lock(&conn_mutex, K_FOREVER);
     if (active_conn) {
-        conn = bt_conn_ref((struct bt_conn *)active_conn);
+        conn = bt_conn_ref(const_cast<struct bt_conn *>(active_conn));
     }
     k_mutex_unlock(&conn_mutex);
 
@@ -293,10 +311,10 @@ struct ZephyrHal {
         k_msleep(ms);
     }
     static bool is_button_held() {
-        return gpio_pin_get_dt(&btn_p5) || gpio_pin_get_dt(&btn_p4);
+        return (gpio_pin_get_dt(&btn_p5) > 0) || (gpio_pin_get_dt(&btn_p4) > 0);
     }
     static bool is_encoder_button_held() {
-        return gpio_pin_get_dt(&btn_p7);
+        return gpio_pin_get_dt(&btn_p7) > 0;
     }
     static void send_hid_report(uint8_t key_bits) {
         ::remote::send_hid_report(key_bits);
@@ -326,17 +344,12 @@ struct ZephyrHal {
 
 using Engine = GestureEngine<ZephyrHal>;
 
-// ─── QDEC Sensor Trigger ────────────────────────────────────────
+// ─── QDEC Sensor Trigger (ISR-safe handoff to thread) ───────────
 static void qdec_trigger_handler(const struct device *dev, const struct sensor_trigger *trigger)
 {
-    struct sensor_value val;
-    if (sensor_sample_fetch(dev) == 0 && sensor_channel_get(dev, SENSOR_CHAN_ROTATION, &val) == 0) {
-        if (val.val1 != 0) {
-            printk("Woke up (Encoder)!\n");
-            Engine::on_encoder_rotate(val.val1);
-            printk("Zzz... Sleeping (Encoder)\n");
-        }
-    }
+    ARG_UNUSED(dev);
+    ARG_UNUSED(trigger);
+    k_sem_give(&enc_rot_sem);
 }
 
 static struct sensor_trigger qdec_trig = {
@@ -346,11 +359,14 @@ static struct sensor_trigger qdec_trig = {
 
 static void button_pressed_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    if (pins & BIT(btn_p7.pin)) {
+    ARG_UNUSED(cb);
+    if (dev == btn_p7.port && (pins & BIT(btn_p7.pin))) {
         k_sem_give(&enc_btn_sem);
-        return;
     }
-    k_sem_give(&btn_sem);
+    if ((dev == btn_p5.port && (pins & BIT(btn_p5.pin))) ||
+        (dev == btn_p4.port && (pins & BIT(btn_p4.pin)))) {
+        k_sem_give(&btn_sem);
+    }
 }
 
 // ─── Button thread (sleeping) ───────────────────────────────────
@@ -392,15 +408,48 @@ void encoder_button_thread(void *, void *, void *)
     }
 }
 
+// ─── Encoder rotation thread (deferred from QDEC ISR) ──────────
+
+K_THREAD_STACK_DEFINE(enc_rot_stack, 1024);
+struct k_thread enc_rot_thread_data;
+
+void encoder_rot_thread(void *, void *, void *)
+{
+    printk("Encoder rotation thread started\n");
+
+    while (true) {
+        k_sem_take(&enc_rot_sem, K_FOREVER);
+        if (!device_is_ready(qdec_dev)) {
+            continue;
+        }
+        struct sensor_value val;
+        if (sensor_sample_fetch(qdec_dev) == 0 &&
+            sensor_channel_get(qdec_dev, SENSOR_CHAN_ROTATION, &val) == 0 &&
+            val.val1 != 0) {
+            printk("Woke up (Encoder)!\n");
+            Engine::on_encoder_rotate(val.val1);
+            printk("Zzz... Sleeping (Encoder)\n");
+        }
+    }
+}
+
 } // namespace
 
 // ─── Connection tracking (called from main.cpp) ─────────────────
 
 extern "C" void hid_set_conn(struct bt_conn *conn)
 {
+    struct bt_conn *old_conn = nullptr;
     k_mutex_lock(&conn_mutex, K_FOREVER);
+    if (active_conn) {
+        old_conn = const_cast<struct bt_conn *>(active_conn);
+    }
     active_conn = bt_conn_ref(conn);
     k_mutex_unlock(&conn_mutex);
+
+    if (old_conn) {
+        bt_conn_unref(old_conn);
+    }
     printk("HID: conn set\n");
 
     if (device_is_ready(qdec_dev)) {
@@ -468,6 +517,12 @@ void HidService::init()
                     7, 0, K_NO_WAIT);
     k_thread_name_set(&enc_btn_thread_data, "enc_btn");
 
+    k_thread_create(&enc_rot_thread_data, enc_rot_stack,
+                    K_THREAD_STACK_SIZEOF(enc_rot_stack),
+                    encoder_rot_thread, nullptr, nullptr, nullptr,
+                    7, 0, K_NO_WAIT);
+    k_thread_name_set(&enc_rot_thread_data, "enc_rot");
+
     if (!device_is_ready(qdec_dev)) {
         printk("QDEC sensor not ready\n");
     }
@@ -492,23 +547,33 @@ void HidService::send_key_up()
 
 void HidService::set_config_mappings(const ConfigMappings& mappings)
 {
+    k_mutex_lock(&config_mutex, K_FOREVER);
     g_mappings = mappings;
+    k_mutex_unlock(&config_mutex);
 }
 
 ConfigMappings HidService::get_config_mappings()
 {
-    return g_mappings;
+    k_mutex_lock(&config_mutex, K_FOREVER);
+    const ConfigMappings snapshot = g_mappings;
+    k_mutex_unlock(&config_mutex);
+    return snapshot;
 }
 
 void HidService::run_button_loop()
 {
-    gpio_pin_configure_dt(&btn_p5, GPIO_INPUT | btn_p5.dt_flags);
-    gpio_pin_configure_dt(&btn_p4, GPIO_INPUT | btn_p4.dt_flags);
-    gpio_pin_configure_dt(&btn_p7, GPIO_INPUT | btn_p7.dt_flags);
+    if (!device_is_ready(btn_p5.port) || !device_is_ready(btn_p4.port) || !device_is_ready(btn_p7.port)) {
+        printk("BTN: GPIO port(s) not ready\n");
+        return;
+    }
 
-    gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_BOTH);
-    gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_BOTH);
-    gpio_pin_interrupt_configure_dt(&btn_p7, GPIO_INT_EDGE_BOTH);
+    gpio_pin_configure_dt(&btn_p5, GPIO_INPUT);
+    gpio_pin_configure_dt(&btn_p4, GPIO_INPUT);
+    gpio_pin_configure_dt(&btn_p7, GPIO_INPUT);
+
+    gpio_pin_interrupt_configure_dt(&btn_p5, GPIO_INT_EDGE_TO_ACTIVE);
+    gpio_pin_interrupt_configure_dt(&btn_p4, GPIO_INT_EDGE_TO_ACTIVE);
+    gpio_pin_interrupt_configure_dt(&btn_p7, GPIO_INT_EDGE_TO_ACTIVE);
 
     gpio_init_callback(&btn_p5_cb_data, button_pressed_isr, BIT(btn_p5.pin));
     gpio_add_callback_dt(&btn_p5, &btn_p5_cb_data);

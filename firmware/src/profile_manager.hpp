@@ -35,6 +35,14 @@ public:
     static constexpr uint8_t kNumSlots = N;
     static constexpr std::string_view kStorageKey = "profile/slot";
 
+    static constexpr bool is_zero_addr(const uint8_t* addr) noexcept {
+        if (!addr) return true;
+        for (int i = 0; i < 7; ++i) {
+            if (addr[i] != 0) return false;
+        }
+        return true;
+    }
+
     /// Initialise from NVS.  Falls back to slot 0 on first boot.
     void init() {
         auto saved = StorageHal::load(kStorageKey);
@@ -44,10 +52,11 @@ public:
             char key[32];
             std::snprintf(key, sizeof(key), "profile/slot%u/addr", i);
             auto addr = StorageHal::load_addr(key);
-            if (addr) {
+            if (addr && !is_zero_addr(addr->data())) {
                 slot_addrs_[i] = *addr;
                 has_bond_[i] = true;
             } else {
+                slot_addrs_[i].fill(0);
                 has_bond_[i] = false;
             }
         }
@@ -76,7 +85,12 @@ public:
 
     /// Directly set address for a slot (used by settings load)
     void set_slot_addr(uint8_t slot, const uint8_t* addr_bytes) {
-        if (slot >= N || !addr_bytes) return;
+        if (slot >= N) return;
+        if (is_zero_addr(addr_bytes)) {
+            slot_addrs_[slot].fill(0);
+            has_bond_[slot] = false;
+            return;
+        }
         for (int i = 0; i < 7; ++i) slot_addrs_[slot][i] = addr_bytes[i];
         has_bond_[slot] = true;
     }

@@ -1,8 +1,8 @@
 #include "hog.hpp"
 #include "battery.hpp"
 #include "profile_manager.hpp"
-// #include "provisioning_service.hpp"  // Disabled: custom vendor service can confuse Windows HID
 
+#include <zephyr/version.h>
 #include <zephyr/types.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/byteorder.h>
@@ -15,11 +15,23 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pwm.h>
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#include <zephyr/usb/usb_device.h>
+#endif
 
 #include <array>
 #include <optional>
 #include <string_view>
+#include <cstdio>
 #include <cstring>
+
+static_assert(sizeof(bt_addr_le_t) == 7, "bt_addr_le_t must be 7 bytes");
+
+#if KERNEL_VERSION_MAJOR >= 4
+static constexpr uint32_t kAdvOptConn = BT_LE_ADV_OPT_CONN;
+#else
+static constexpr uint32_t kAdvOptConn = BT_LE_ADV_OPT_CONNECTABLE;
+#endif
 
 namespace remote {
 
@@ -81,7 +93,6 @@ public:
         if (active) {
             printk("LED: 1 (ON)\n");
             if (device_is_ready(led_red.port)) gpio_pin_set_dt(&led_red, 1);
-            BuzzerController::beep();
         } else {
             printk("LED: 0 (OFF)\n");
             if (device_is_ready(led_red.port)) gpio_pin_set_dt(&led_red, 0);
@@ -173,6 +184,10 @@ struct NvsStorageHal {
     static bool store_addr(std::string_view key, const uint8_t* addr) {
         char key_str[64];
         std::snprintf(key_str, sizeof(key_str), "remote/%.*s", static_cast<int>(key.size()), key.data());
+        if (ProfileManager<NvsStorageHal, 4>::is_zero_addr(addr)) {
+            int err = settings_delete(key_str);
+            return err == 0 || err == -ENOENT;
+        }
         int err = settings_save_one(key_str, addr, 7);
         return err == 0;
     }
@@ -286,6 +301,9 @@ public:
         }
         settings_register(&remote_conf);
 
+        bt_conn_cb_register(&conn_callbacks);
+        bt_conn_auth_info_cb_register(&auth_info_callbacks);
+
         err = bt_enable(bt_ready_callback);
         if (err) {
             printk("Bluetooth init failed (err %d)\n", err);
@@ -303,7 +321,7 @@ public:
         .id = BT_ID_DEFAULT,
         .sid = 0,
         .secondary_max_skip = 0,
-        .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_SCANNABLE,
+        .options = kAdvOptConn | BT_LE_ADV_OPT_SCANNABLE,
         .interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
         .interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
         .peer = nullptr,
@@ -328,7 +346,7 @@ public:
                 .id = profile_mgr.active_slot(),
                 .sid = 0,
                 .secondary_max_skip = 0,
-                .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY | BT_LE_ADV_OPT_DIR_ADDR_RPA,
+                .options = kAdvOptConn | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY | BT_LE_ADV_OPT_DIR_ADDR_RPA,
                 .interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
                 .interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
                 .peer = &target,
@@ -360,11 +378,13 @@ public:
             }
 
             // Print identity address for debugging
-            bt_addr_le_t id_addr;
-            size_t count = 1;
-            bt_id_get(&id_addr, &count);
-            char addr_str[BT_ADDR_LE_STR_LEN];
-            bt_addr_le_to_str(&id_addr, addr_str, sizeof(addr_str));
+            bt_addr_le_t id_addrs[CONFIG_BT_ID_MAX];
+            size_t count = CONFIG_BT_ID_MAX;
+            bt_id_get(id_addrs, &count);
+            char addr_str[BT_ADDR_LE_STR_LEN] = "unknown";
+            if (current_slot < count) {
+                bt_addr_le_to_str(&id_addrs[current_slot], addr_str, sizeof(addr_str));
+            }
             printk("ADV: start slot %d using ID addr %s\n", current_slot, addr_str);
 
             int err = bt_le_adv_start(&param,
@@ -377,26 +397,24 @@ public:
         }
     }
 
-    static void start_advertising() {
+    static bool start_advertising() {
         // Stop any existing advertising first
         bt_le_adv_stop();
 
-        // Retry advertising up to 3 times with fast intervals
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            int err = try_advertising();
-            if (!err) {
-                printk("Advertising started (attempt %d)\n", attempt + 1);
-                is_advertising = true;
-                LedController::set_advertising(true);
-                return;
-            }
-            printk("Advertising failed (err %d), retry %d\n", err, attempt + 1);
-            k_msleep(500);
-            bt_le_adv_stop();
+        int err = try_advertising();
+        if (!err) {
+            const uint8_t current_slot = profile_mgr.active_slot();
+            printk("Advertising started\n");
+            is_advertising = true;
+            last_adv_id = current_slot;
+            last_adv_mode_directed = (current_slot < 3) && profile_mgr.active_addr().has_value() && use_directed_adv;
+            LedController::set_advertising(true);
+            return true;
         }
-        printk("Advertising FAILED after 3 attempts!\n");
+        printk("Advertising start failed (err %d), watchdog will retry\n", err);
         is_advertising = false;
         LedController::set_advertising(false);
+        return false;
     }
 
 private:
@@ -408,6 +426,8 @@ private:
 
         printk("Bluetooth initialized\n");
         HidService::init();
+
+        profile_mgr.init();
 
         if (IS_ENABLED(CONFIG_SETTINGS)) {
             settings_load();
@@ -425,13 +445,12 @@ private:
             id_count++;
         }
 
-        profile_mgr.init();
-        printk("Profile manager init (slot %u)\n", profile_mgr.active_slot());
+        printk("Profile manager ready (slot %u)\n", profile_mgr.active_slot());
 
-        start_advertising();
+        const bool adv_ok = start_advertising();
 
         // Start the advertising watchdog
-        k_work_reschedule(&adv_watchdog_work, K_SECONDS(kAdvWatchdogIntervalSec));
+        k_work_reschedule(&adv_watchdog_work, adv_ok ? K_SECONDS(kAdvWatchdogIntervalSec) : K_MSEC(500));
         printk("Advertising watchdog started (every %ds)\n", kAdvWatchdogIntervalSec);
     }
 
@@ -442,6 +461,7 @@ private:
         if (err) {
             printk("Connection failed: %s (0x%02x)\n", addr, err);
             is_connected = false;
+            is_advertising = false;
             // The watchdog will restart advertising safely
             k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
             return;
@@ -487,10 +507,11 @@ private:
     static void pairing_complete(struct bt_conn *conn, bool bonded) {
         if (bonded) {
             struct bt_conn_info info;
-            bt_conn_get_info(conn, &info);
-            const bt_addr_le_t *addr = info.le.dst;
-            profile_mgr.update_active_addr(reinterpret_cast<const uint8_t*>(addr));
-            printk("REL: Bond established, identity address saved to slot %u\n", profile_mgr.active_slot());
+            if (bt_conn_get_info(conn, &info) == 0 && profile_mgr.active_slot() < 3) {
+                const bt_addr_le_t *addr = info.le.dst;
+                profile_mgr.update_active_addr(reinterpret_cast<const uint8_t*>(addr));
+                printk("REL: Bond established, identity address saved to slot %u\n", profile_mgr.active_slot());
+            }
         }
     }
 
@@ -516,21 +537,13 @@ private:
             printk("Pairing cancelled: %s\n", addr);
         },
     };
-
-    // Registration helper
-    struct ConnCbReg {
-        ConnCbReg() { 
-            bt_conn_cb_register(&conn_callbacks);
-            bt_conn_auth_info_cb_register(&auth_info_callbacks);
-        }
-    };
-    static inline ConnCbReg cb_reg;
 };
 
 // ─── Implementation of handlers ─────────────────────────────────
 
 static void adv_watchdog_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     // If connected, no need to advertise — just reschedule
     if (is_connected) {
         adv_tick_count = 0;
@@ -539,16 +552,22 @@ static void adv_watchdog_handler(struct k_work *work)
     }
 
     uint8_t current_id = profile_mgr.active_slot();
-    bool should_be_directed = use_directed_adv;
+    const bool has_bond = (current_id < 3) && profile_mgr.active_addr().has_value();
+    bool should_be_directed = has_bond && use_directed_adv;
 
     // Toggle logic: if we have a bond, swap between directed and undirected every 20 seconds (4 ticks)
-    adv_tick_count++;
-    if (adv_tick_count > 4) {
+    if (has_bond) {
+        adv_tick_count++;
+        if (adv_tick_count > 4) {
+            adv_tick_count = 0;
+            use_directed_adv = !use_directed_adv;
+            should_be_directed = use_directed_adv;
+            printk("ADV watchdog: Toggle mode to %s\n", should_be_directed ? "directed" : "undirected");
+            bt_le_adv_stop(); // Force restart in new mode
+            is_advertising = false;
+        }
+    } else {
         adv_tick_count = 0;
-        use_directed_adv = !use_directed_adv;
-        should_be_directed = use_directed_adv;
-        printk("ADV watchdog: Toggle mode to %s\n", should_be_directed ? "directed" : "undirected");
-        bt_le_adv_stop(); // Force restart in new mode
     }
 
     // Force identity switch if needed (Restart if Slot or Mode changed)
@@ -558,22 +577,24 @@ static void adv_watchdog_handler(struct k_work *work)
         is_advertising = false;
     }
 
-    // Try to start advertising
-    int err = BluetoothManager::try_advertising(!should_be_directed);
+    // Only start/restart advertising if not already actively advertising in the desired slot/mode
+    if (!is_advertising) {
+        int err = BluetoothManager::try_advertising(!should_be_directed);
 
-    if (err == 0 || err == -EALREADY) {
-        // Double-check we didn't connect asynchronously while try_advertising was blocking
-        if (!is_connected) {
-            is_advertising = true;
-            last_adv_id = current_id;
-            last_adv_mode_directed = should_be_directed;
-            LedController::set_advertising(true);
+        if (err == 0 || err == -EALREADY) {
+            // Double-check we didn't connect asynchronously while try_advertising was blocking
+            if (!is_connected) {
+                is_advertising = true;
+                last_adv_id = current_id;
+                last_adv_mode_directed = should_be_directed;
+                LedController::set_advertising(true);
+            }
+        } else {
+            printk("ADV watchdog: adv start err %d (slot %u)\n", err, current_id);
+            is_advertising = false;
+            LedController::set_advertising(false);
+            bt_le_adv_stop();
         }
-    } else {
-        printk("ADV watchdog: adv start err %d (slot %u)\n", err, current_id);
-        is_advertising = false;
-        LedController::set_advertising(false);
-        bt_le_adv_stop();
     }
 
     k_work_reschedule(&adv_watchdog_work, K_SECONDS(kAdvWatchdogIntervalSec));
@@ -591,15 +612,14 @@ extern "C" void clear_bonds() {
     is_advertising = false;
     hid_disconnect();
     
-    // 3. Delete and re-create identity (IDs > 0) to change the random address
-    // This forces Windows to see it as a brand new device.
+    // 3. Reset identity in-place (IDs > 0) to change the random address
+    // This forces Windows to see it as a brand new device without losing the slot.
     if (id > 0) {
-        bt_id_delete(id);
-        int new_id = bt_id_create(nullptr, nullptr);
-        if (new_id < 0) {
-            printk("Failed to re-create BT ID (err %d)\n", new_id);
+        int reset_res = bt_id_reset(id, nullptr, nullptr);
+        if (reset_res < 0) {
+            printk("Failed to reset BT ID %u (err %d)\n", id, reset_res);
         } else {
-            printk("Re-created BT ID %d for slot %u\n", new_id, id);
+            printk("Reset BT ID %d for slot %u\n", reset_res, id);
         }
     }
     
@@ -646,6 +666,10 @@ extern "C" void on_profile_switch_request() {
 } // namespace remote
 
 int main() {
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+    usb_enable(nullptr);
+    k_msleep(200);
+#endif
     printk("Starting Camera Remote (Modern C++)...\n");
 
     remote::LedController::init();

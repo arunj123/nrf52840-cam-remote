@@ -93,6 +93,11 @@ jobs:
       run: |
         pip install -r ${ZEPHYR_WORKSPACE}/zephyr/scripts/requirements.txt
 
+    # ---------- Unit Tests ----------
+    - name: Run Unit Tests
+      working-directory: nrf_control
+      run: ./scripts/test.sh
+
     # ---------- Build ----------
     - name: Build Firmware
       run: |
@@ -102,8 +107,10 @@ jobs:
           ${{ github.workspace }}/nrf_control/firmware
 
     # ---------- Artifacts ----------
-    - name: Upload firmware hex
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
       with:
         name: camera-remote-firmware
-        path: nrf_control/firmware/build/zephyr/zephyr.hex
+        path: |
+          nrf_control/firmware/build/zephyr/zephyr.hex
+          nrf_control/firmware/build/zephyr/zephyr.uf2

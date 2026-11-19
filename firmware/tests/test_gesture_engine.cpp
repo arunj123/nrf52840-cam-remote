@@ -15,6 +15,7 @@ struct MockState {
     int beep_count = 0;
     bool led_active = false;
     int profile_switch_count = 0;
+    int clear_bonds_count = 0;
     uint8_t active_profile = 0;
     remote::ConfigMappings mappings = {
         .main_button_single = HidKey::VolumeUp,
@@ -34,6 +35,7 @@ struct MockState {
         beep_count = 0;
         led_active = false;
         profile_switch_count = 0;
+        clear_bonds_count = 0;
         active_profile = 0;
         mappings = {
             .main_button_single = HidKey::VolumeUp,
@@ -65,7 +67,7 @@ struct MockHal {
     static void buzzer_long_beep() { state.beep_count++; }
     static void led_set_trigger_active(bool active) { state.led_active = active; }
     static void on_profile_switch() { state.profile_switch_count++; }
-    static void clear_bonds() { }
+    static void clear_bonds() { state.clear_bonds_count++; }
     static uint8_t get_active_profile() { return state.active_profile; }
     static remote::ConfigMappings get_config_mappings() { return state.mappings; }
 };
@@ -76,6 +78,7 @@ class GestureEngineTest : public ::testing::Test {
 protected:
     void SetUp() override {
         state.reset();
+        TestEngine::reset();
     }
     
     void simulate_main_button_press(int hold_duration_ms) {
@@ -144,4 +147,67 @@ TEST_F(GestureEngineTest, ConfigurableProfileEncoderButton) {
     TestEngine::on_encoder_button_press();
     ASSERT_EQ(state.sent_reports.size(), 2);
     EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::PlayPause));
+}
+
+TEST_F(GestureEngineTest, ShortGlitchIsIgnored) {
+    simulate_main_button_press(30);
+    EXPECT_TRUE(state.sent_reports.empty());
+    EXPECT_EQ(state.beep_count, 0);
+}
+
+TEST_F(GestureEngineTest, FiveSecondHoldClearsBonds) {
+    simulate_main_button_press(5100);
+    EXPECT_EQ(state.clear_bonds_count, 1);
+    EXPECT_TRUE(state.sent_reports.empty());
+}
+
+TEST_F(GestureEngineTest, EncoderButtonShortPressSendsMute) {
+    state.encoder_button_held = true;
+    state.encoder_release_time_ms = state.time_ms + 100;
+    TestEngine::on_encoder_button_press();
+    ASSERT_EQ(state.sent_reports.size(), 2);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::Mute));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+}
+
+TEST_F(GestureEngineTest, EncoderButtonLongPressSwitchesProfile) {
+    state.encoder_button_held = true;
+    state.encoder_release_time_ms = state.time_ms + 900;
+    TestEngine::on_encoder_button_press();
+    EXPECT_EQ(state.profile_switch_count, 1);
+    EXPECT_TRUE(state.sent_reports.empty());
+}
+
+TEST_F(GestureEngineTest, EncoderSubDetentAccumulation) {
+    TestEngine::on_encoder_rotate(30);
+    EXPECT_TRUE(state.sent_reports.empty());
+
+    TestEngine::on_encoder_rotate(30);
+    ASSERT_EQ(state.sent_reports.size(), 2);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::VolumeDown));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+}
+
+TEST_F(GestureEngineTest, EncoderFastSpinMultipleDetents) {
+    TestEngine::on_encoder_rotate(-120);
+    ASSERT_EQ(state.sent_reports.size(), 4);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::VolumeUp));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+    EXPECT_EQ(state.sent_reports[2], static_cast<uint8_t>(HidKey::VolumeUp));
+    EXPECT_EQ(state.sent_reports[3], 0x00);
+}
+
+TEST_F(GestureEngineTest, CustomMappingsApplyOnHidSlot0) {
+    state.active_profile = 0;
+    state.mappings.main_button_single = HidKey::PlayPause;
+    simulate_main_button_press(100);
+    ASSERT_EQ(state.sent_reports.size(), 2);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::PlayPause));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+}
+
+TEST_F(GestureEngineTest, HidKeyNoneSendsNoReport) {
+    state.mappings.main_button_single = HidKey::None;
+    simulate_main_button_press(100);
+    EXPECT_TRUE(state.sent_reports.empty());
 }
