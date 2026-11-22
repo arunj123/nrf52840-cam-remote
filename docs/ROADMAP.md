@@ -63,18 +63,18 @@
 ---
 
 ## 4. Verification & Handover Status
-- **Verified Build History:** Firmware `4866610` flashed & verified on hardware; CAD enclosure committed at `e5726b6`; QDEC pin remap (`115`/`113`) built & verified (ready to flash).
+- **Verified Build History:** Firmware `4866610` -> CAD enclosure `e5726b6` -> QDEC `115`/`113` remap `c2b7262` (**built, flashed & verified on hardware**).
 - **Host Unit Tests (`python scripts/build.py --test`):** **56 / 56 passed** (`100% tests passed, 0 tests failed out of 56`, `1.22 sec`) across `test_gesture_engine` (26), `test_battery_conversion` (11), and `test_profile_manager` (19).
 - **Latest NCS v2.8.0 Firmware Build (`python scripts/build.py`):**
   - **Result:** Exit code `0`, **0 warnings/errors**, `qdec_default`/`qdec_sleep` verified in `zephyr.dts` (`psels = <0x1a00002f>, <0x1b00002d>` for `P1.15`/`P1.13`), `pwm0_default_buzzer` verified on `P0.22` (`0x16000016`), `CONFIG_BT_ID_UNPAIR_MATCHING_BONDS=y`, `CONFIG_NORDIC_QSPI_NOR` disabled, `CONFIG_USB_CDC_ACM_RINGBUF_SIZE=4096`, `CONFIG_BT_MAX_CONN=4`, `CONFIG_BT_DEVICE_NAME_DYNAMIC=y`.
   - **Linker Footprint:** `FLASH: 223,776 B / 796 KB (27.45%)`, `RAM: 63,964 B / 256 KB (24.40%)`.
   - **`arm-zephyr-eabi-size`:** `ROM / Flash Used: 223,770 Bytes / 1,048,576 Bytes (21.34%)`, `RAM Used: 64,365 Bytes / 262,144 Bytes (24.55%)`.
-  - **UF2 Output (Built, Pending User Flash):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`448,000 bytes`, start address `0x26000`).
-- **Verified On-Hardware Telemetry (`COM9`, `115200` baud, previous build `4866610`):**
-  - Clean boot (`nRF Connect SDK v2.8.0-a2386bfc8401` / `Zephyr OS v3.7.99-0bc3393fb112`), 9 early boot messages dropped before CDC ACM attach (zero QDEC/init errors).
-  - One-time schema v2 migration executed cleanly: `Settings loaded`, `MIGRATION: schema 0 -> 2, resetting HID slots 0..2 bonds & IDs`, `REL: Bond deleted on slot 0 (BT ID 1)`, `REL: Bond deleted on slot 1 (BT ID 2)`, `Profile manager ready (slot 0)`.
-  - Threads & advertising active on rotated BT ID 1 address: `Button`, `Secondary button`, `Encoder button`, `Encoder rotation`, `BAT: raw=383, avg=383, mV=5142, %=100`, `HID Ready: Press=Photo, Hold=Burst (interrupt-driven)`, `ADV: start slot 0 (Cam Remote Pro 1, BT ID 1) using addr FD:2C:02:A2:1F:EC (random)`, `Advertising started`, `Advertising watchdog started (every 5s)`.
-- **Exact Next Step (Flash QDEC Remap, Check Buzzer Pad `022`, Print & Push):**
-  1. Double-tap `RST` on the board and flash the new `115`/`113` build via `python scripts/build.py --flash`, then verify EC11 rotation (`Woke up (Encoder)!`) and check buzzer wiring against pad **`022`** (`P0.22`) and **`GND`**.
+  - **UF2 Output (Built & Flashed):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`448,000 bytes`, start address `0x26000`), flashed via `python scripts/build.py --flash` to `D:\FLASH.UF2` (`UF2 Bootloader 0.11.0`, clean unmount & reboot verified).
+- **Verified On-Hardware Telemetry (`COM9`, `115200` baud, build `c2b7262`):**
+  - Clean boot (`nRF Connect SDK v2.8.0-a2386bfc8401` / `Zephyr OS v3.7.99-0bc3393fb112`), 6 early boot messages dropped before CDC ACM attach (zero QDEC/init errors).
+  - Active slot & identities restored: `Settings loaded`, `Profile manager ready (slot 0)`, `ADV: start slot 0 (Cam Remote Pro 1, BT ID 1) using addr FD:2C:02:A2:1F:EC (random)`.
+  - Threads active & BLE reconnected cleanly: `Button`, `Secondary button`, `Encoder button`, `Encoder rotation`, `BAT: raw=374, avg=374, mV=5021, %=100`, `HID Ready: Press=Photo, Hold=Burst (interrupt-driven)`, `BAS Notifications enabled`, `Connected (slot 0, BT ID 1): 8C:88:1B:27:4E:CC (public)`, `Security changed: ... level 2`.
+- **Exact Next Step (Test Rotation, Check Buzzer Pad `022`, Print & Push):**
+  1. Test EC11 rotation (`Woke up (Encoder)!` in serial log / Volume Up & Down on PC) and confirm buzzer wiring on silkscreen pad **`022`** (`P0.22`) and **`GND`**.
   2. Print [nrf_remote_calibration_coupon.stl](file:///c:/Users/arunj/projects/nrf_control/hardware/case/stl/nrf_remote_calibration_coupon.stl) on the Anycubic Kobra 3 v2 (~15 min) to verify MX switch snap, `M1.6` wafer-head fit, and thumbwheel shaft press-fit, then print [nrf_remote_print_plate_all.stl](file:///c:/Users/arunj/projects/nrf_control/hardware/case/stl/nrf_remote_print_plate_all.stl) and bench-assemble.
   3. Verify BLE HID & Slot 3 [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html) end-to-end and push to `origin/master`.
