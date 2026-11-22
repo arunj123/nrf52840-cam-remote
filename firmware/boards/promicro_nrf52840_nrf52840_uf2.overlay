@@ -1,12 +1,12 @@
 /*
  * Overlay for Pro Micro nRF52840
  *
- * Pin Mapping:
- *   - D5 (Trigger P5):  P0.xx
- *   - D4 (Trigger P4):  P0.xx
- *   - D7 (Encoder Mute): P0.xx
- *   - D2, D3 (QDEC A/B): P0.xx / P0.xx
- *   - D6 (Buzzer):      P0.xx
+ * Pin Mapping (PCB Silk -> GPIO):
+ *   - 020 (Trigger 1):     P0.20
+ *   - 017 (Trigger 2):     P0.17
+ *   - 024 (Encoder Mute):  P0.24
+ *   - 115, 113 (QDEC A/B): P1.15 / P1.13
+ *   - 022 (Buzzer PWM):    P0.22
  */
 
 #include <zephyr/dt-bindings/adc/adc.h>
@@ -125,16 +125,16 @@
 
 	qdec_default: qdec_default {
 		group1 {
-			psels = <NRF_PSEL(QDEC_A, 0, 10)>,  /* D2 -> P0.10 */
-				<NRF_PSEL(QDEC_B, 1, 11)>;  /* D3 -> P1.11 */
+			psels = <NRF_PSEL(QDEC_A, 1, 15)>,  /* Silk 115 -> P1.15 */
+				<NRF_PSEL(QDEC_B, 1, 13)>;  /* Silk 113 -> P1.13 */
 			bias-pull-up;
 		};
 	};
 
 	qdec_sleep: qdec_sleep {
 		group1 {
-			psels = <NRF_PSEL(QDEC_A, 0, 10)>,
-				<NRF_PSEL(QDEC_B, 1, 11)>;
+			psels = <NRF_PSEL(QDEC_A, 1, 15)>,
+				<NRF_PSEL(QDEC_B, 1, 13)>;
 			bias-pull-up;
 			low-power-enable;
 		};

@@ -11,20 +11,20 @@ A Bluetooth Low Energy HID Camera Remote using a Pro Micro nRF52840 / Nice!Nano 
   - Windows NCS v2.8.0 build target: `adafruit_feather_nrf52840/nrf52840/uf2` (with project board overlay).
   - Linux / WSL / Zephyr v4.3.0 CI build target: `promicro_nrf52840/nrf52840/uf2`.
 
-### Pin Mappings (Pro Micro)
+### Pin Mappings (Pro Micro nRF52840)
 
-The firmware is configured for the following physical connections:
+The firmware is configured for the following physical connections (connect rotary encoder common/middle pin and one side of each switch/buzzer to `GND`):
 
-| Physical Pin # | Label | GPIO | Function in App |
-| :--- | :--- | :--- | :--- |
-| **Pin 5** | **D2** | `P0.10` | Encoder Phase A |
-| **Pin 6** | **D3** | `P1.11` | Encoder Phase B |
-| **Pin 7** | **D4** | `P0.17` | **Trigger 2** (Secondary Action) |
-| **Pin 8** | **D5** | `P0.20` | **Trigger 1** (Main Shutter) |
-| **Pin 9** | **D6** | `P0.22` | Buzzer (4kHz PWM) |
-| **Pin 10** | **D7** | `P0.24` | **Encoder Switch** (Mute/Profile) |
-| **Internal** | **VCC Gate** | `P0.13` | External 3.3V Rail Enable (`ACTIVE_HIGH`) |
-| **On-board** | **LED** | `P0.15` | Status Indicator (Red) |
+| PCB Silk | GPIO | Function in App |
+| :--- | :--- | :--- |
+| **`115`** | `P1.15` | Encoder Phase A (QDEC) |
+| **`113`** | `P1.13` | Encoder Phase B (QDEC) |
+| **`017`** | `P0.17` | **Trigger 2** (Secondary Action) |
+| **`020`** | `P0.20` | **Trigger 1** (Main Shutter) |
+| **`022`** | `P0.22` | Buzzer (4kHz PWM) |
+| **`024`** | `P0.24` | **Encoder Switch** (Mute/Profile) |
+| **Internal** | `P0.13` | External 3.3V Rail Enable (`ACTIVE_HIGH`) |
+| **On-board** | `P0.15` | Status Indicator (Red) |
 
 ---
 
@@ -36,24 +36,24 @@ git checkout board-verification
 ```
 
 ### LED & Audio Feedback
-- **🔴 Red LED (`P0.15`) + 🔊 Beep (`D6` / `P0.22`)**: Trigger detected (single click = short beep, burst = long beep).
+- **🔴 Red LED (`P0.15`) + 🔊 Beep (`022` / `P0.22`)**: Trigger detected (single click = short beep, burst = long beep).
 - **Profile Switch**: `N+1` short beeps and red LED blinks when cycling to Slot `N` (Slots `0–2` HID, Slot `3` Config Mode).
 - **Bond Clear (5s hold)**: 3 countdown beeps followed by 1 long beep.
 
-> **Note**: A **passive ceramic piezo buzzer** is driven between **D6 (`P0.22`)** and **GND** using 4 kHz PWM (`H0H1` high-drive). On Nice!Nano clones, the blue LED is hardwired to the TP4054 charger IC (`CHRG`), not the MCU.
+> **Note**: A **passive ceramic piezo buzzer** is driven between silkscreen pad **`022` (`P0.22`)** and **`GND`** using 4 kHz PWM (`H0H1` high-drive). On Nice!Nano clones, the blue LED is hardwired to the TP4054 charger IC (`CHRG`), not the MCU.
 
 ### Click Modes
 | Gesture | Device | Default Action (Custom per slot via `config.html`) | Buzzer / LED Feedback |
 |---------|--------|----------------------------------------------------|-----------------------|
-| **Press (<0.5s)** | Main Button (`D5`) | Photo / Video Start-Stop (`Volume Up`) | 1 short beep + LED |
-| **Hold (0.5s–5s)** | Main Button (`D5`) | Burst Mode (hold `Volume Up` for 2s) | 1 long beep + LED |
-| **Hold (>=5s)** | Main Button (`D5`) | Clear Active Slot Bond & Rotate BT ID | Countdown + long beep |
-| **Press (<0.5s)** | Second Button (`D4`) | Media Play / Pause (`Play/Pause`) | 1 short beep + LED |
-| **Hold (>=0.5s)** | Second Button (`D4`) | Media Skip Forward (`Next Track`) | 1 long beep + LED |
-| **Rotate C/W** | Encoder | `Volume Up` | None |
-| **Rotate CC/W** | Encoder | `Volume Down` | None |
-| **Press (<0.5s)** | Encoder | `Mute` Toggle | None |
-| **Hold (>=0.5s)** | Encoder | Cycle Slot (`0 → 1 → 2 → 3 → 0`) | `N+1` beeps + LED blinks |
+| **Press (<0.5s)** | Main Button (`020` / `P0.20`) | Photo / Video Start-Stop (`Volume Up`) | 1 short beep + LED |
+| **Hold (0.5s–5s)** | Main Button (`020` / `P0.20`) | Burst Mode (hold `Volume Up` for 2s) | 1 long beep + LED |
+| **Hold (>=5s)** | Main Button (`020` / `P0.20`) | Clear Active Slot Bond & Rotate BT ID | Countdown + long beep |
+| **Press (<0.5s)** | Second Button (`017` / `P0.17`) | Media Play / Pause (`Play/Pause`) | 1 short beep + LED |
+| **Hold (>=0.5s)** | Second Button (`017` / `P0.17`) | Media Skip Forward (`Next Track`) | 1 long beep + LED |
+| **Rotate C/W** | Encoder (`115` / `113`) | `Volume Up` | None |
+| **Rotate CC/W** | Encoder (`115` / `113`) | `Volume Down` | None |
+| **Press (<0.5s)** | Encoder (`024` / `P0.24`) | `Mute` Toggle | None |
+| **Hold (>=0.5s)** | Encoder (`024` / `P0.24`) | Cycle Slot (`0 → 1 → 2 → 3 → 0`) | `N+1` beeps + LED blinks |
 
 > **iPhone**: On iPhone 11+, holding Volume Up triggers QuickTake by default. To enable burst: **Settings > Camera > Use Volume Up for Burst**.
 

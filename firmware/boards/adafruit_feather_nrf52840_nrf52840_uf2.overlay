@@ -78,7 +78,7 @@
 };
 
 &uicr {
-	/* Required so P0.10 (NFC2 / D2) operates as GPIO for QDEC Phase A */
+	/* Keep NFCT pins available as GPIOs (P0.09/P0.10); QDEC Phase A/B use P1.15/P1.13 */
 	nfct-pins-as-gpios;
 };
 
@@ -152,16 +152,16 @@
 
 	qdec_default: qdec_default {
 		group1 {
-			psels = <NRF_PSEL(QDEC_A, 0, 10)>,  /* D2 -> P0.10 */
-				<NRF_PSEL(QDEC_B, 1, 11)>;  /* D3 -> P1.11 */
+			psels = <NRF_PSEL(QDEC_A, 1, 15)>,  /* Silk 115 -> P1.15 */
+				<NRF_PSEL(QDEC_B, 1, 13)>;  /* Silk 113 -> P1.13 */
 			bias-pull-up;
 		};
 	};
 
 	qdec_sleep: qdec_sleep {
 		group1 {
-			psels = <NRF_PSEL(QDEC_A, 0, 10)>,
-				<NRF_PSEL(QDEC_B, 1, 11)>;
+			psels = <NRF_PSEL(QDEC_A, 1, 15)>,
+				<NRF_PSEL(QDEC_B, 1, 13)>;
 			bias-pull-up;
 			low-power-enable;
 		};
