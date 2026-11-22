@@ -439,3 +439,49 @@ TEST_F(GestureEngineTest, InitialContactBounceAtWakeIsNotDropped) {
     EXPECT_EQ(state.sent_reports[1], 0x00);
     EXPECT_EQ(state.beep_count, 1);
 }
+
+TEST_F(GestureEngineTest, SlotRequiresKeyboardAndMouseDetection) {
+    EXPECT_FALSE(remote::slot_requires_keyboard(remote::kDefaultConfigMappings));
+    EXPECT_FALSE(remote::slot_requires_mouse(remote::kDefaultConfigMappings));
+
+    remote::ConfigMappings mouse_only = remote::kDefaultConfigMappings;
+    mouse_only.encoder_cw = HidKey::ScrollUp;
+    mouse_only.encoder_ccw = HidKey::ScrollDown;
+    EXPECT_FALSE(remote::slot_requires_keyboard(mouse_only));
+    EXPECT_TRUE(remote::slot_requires_mouse(mouse_only));
+
+    remote::ConfigMappings streaming = remote::kDefaultConfigMappings;
+    streaming.main_button_single = HidKey::PlayPause;
+    streaming.main_button_long = HidKey::KeyFullscreen;
+    streaming.secondary_button_single = HidKey::KeyRight;
+    streaming.secondary_button_long = HidKey::KeyLeft;
+    EXPECT_TRUE(remote::slot_requires_keyboard(streaming));
+    EXPECT_FALSE(remote::slot_requires_mouse(streaming));
+
+    remote::ConfigMappings mixed = mouse_only;
+    mixed.secondary_button_long = HidKey::ShortcutCopy;
+    EXPECT_TRUE(remote::slot_requires_keyboard(mixed));
+    EXPECT_TRUE(remote::slot_requires_mouse(mixed));
+
+    // Verify every single field independently triggers keyboard HID detection
+    for (int idx = 0; idx < 7; ++idx) {
+        remote::ConfigMappings single_kbd = remote::kDefaultConfigMappings;
+        switch (idx) {
+            case 0: single_kbd.main_button_single = HidKey::KeySpace; break;
+            case 1: single_kbd.main_button_long = HidKey::KeyFullscreen; break;
+            case 2: single_kbd.encoder_cw = HidKey::KeyRight; break;
+            case 3: single_kbd.encoder_ccw = HidKey::KeyLeft; break;
+            case 4: single_kbd.encoder_button_short = HidKey::KeyEnter; break;
+            case 5: single_kbd.secondary_button_single = HidKey::KeyRight; break;
+            case 6: single_kbd.secondary_button_long = HidKey::KeyLeft; break;
+        }
+        EXPECT_TRUE(remote::slot_requires_keyboard(single_kbd)) << "Failed at field index " << idx;
+    }
+
+    // Consumer BrowserBack (0x40) must NOT trigger keyboard HID
+    remote::ConfigMappings browser_nav = remote::kDefaultConfigMappings;
+    browser_nav.secondary_button_single = HidKey::BrowserBack;
+    browser_nav.secondary_button_long = HidKey::BrowserForward;
+    EXPECT_FALSE(remote::slot_requires_keyboard(browser_nav));
+    EXPECT_FALSE(remote::slot_requires_mouse(browser_nav));
+}

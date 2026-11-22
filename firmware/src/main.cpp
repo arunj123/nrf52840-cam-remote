@@ -308,9 +308,20 @@ static constexpr std::array<std::string_view, 4> kSlotNames = {
     "Cam Remote Pro 3",
     "Cam Config",
 };
+static_assert(kSlotNames[0].size() <= 16 && kSlotNames[1].size() <= 16 && kSlotNames[2].size() <= 16,
+              "HID slot names must be <= 16 bytes so flags+UUID16+appearance+name fit in 31-byte ADV");
+
+static constexpr uint16_t kAppearanceGenericHid = 960; // 0x03C0 (Generic HID - keeps mobile touch keyboard visible)
+static constexpr uint16_t kAppearanceKeyboard   = 961; // 0x03C1 (Keyboard)
 
 static constexpr std::string_view slot_device_name(uint8_t slot) noexcept {
     return (slot < kSlotNames.size()) ? kSlotNames[slot] : kSlotNames[0];
+}
+
+static uint16_t slot_appearance(uint8_t slot) {
+    return (slot < kNumHidSlots && HidService::slot_uses_keyboard(slot))
+        ? kAppearanceKeyboard
+        : kAppearanceGenericHid;
 }
 
 static constexpr uint8_t sd_uuid[] = {
@@ -378,20 +389,27 @@ public:
         const uint8_t current_slot = profile_mgr.active_slot();
         const uint8_t bt_id = slot_to_bt_id(current_slot);
         const std::string_view name = slot_device_name(current_slot);
+        const uint16_t appearance = slot_appearance(current_slot);
 
         // Force stop any previous advertising set before starting a new one
         // This prevents Identity collisions (-EALREADY / -120) when switching slots.
         bt_le_adv_stop();
 
-        // Keep GAP Device Name (0x2A00) aligned with the active slot
+        // Keep GAP Device Name (0x2A00) and Appearance (0x2A01) aligned with the active slot
         bt_set_name(name.data());
+        bt_set_appearance(appearance);
 
         struct bt_le_adv_param param = adv_param_usage;
         param.id = bt_id;
 
-        const std::array<struct bt_data, 3> ad_usage = {{
+        const std::array<uint8_t, 2> ad_appearance = {
+            static_cast<uint8_t>(appearance & 0xFFU),
+            static_cast<uint8_t>((appearance >> 8) & 0xFFU),
+        };
+        const std::array<struct bt_data, 4> ad_usage = {{
             { .type = BT_DATA_FLAGS, .data_len = sizeof(ad_flags), .data = ad_flags },
             { .type = BT_DATA_UUID16_ALL, .data_len = sizeof(ad_uuid), .data = ad_uuid },
+            { .type = BT_DATA_GAP_APPEARANCE, .data_len = ad_appearance.size(), .data = ad_appearance.data() },
             { .type = BT_DATA_NAME_COMPLETE, .data_len = static_cast<uint8_t>(name.size()), .data = reinterpret_cast<const uint8_t*>(name.data()) },
         }};
 
@@ -419,8 +437,8 @@ public:
         if (bt_id < count) {
             bt_addr_le_to_str(&id_addrs[bt_id], addr_str, sizeof(addr_str));
         }
-        printk("ADV: start slot %u (%s, BT ID %u) using addr %s\n",
-               current_slot, name.data(), bt_id, addr_str);
+        printk("ADV: start slot %u (%s, BT ID %u, app=0x%04x) using addr %s\n",
+               current_slot, name.data(), bt_id, appearance, addr_str);
 
         int err = bt_le_adv_start(&param,
                                ad_to_use, ad_len_to_use,
@@ -546,6 +564,7 @@ private:
         LedController::set_advertising(false);
 
         if (slot < kNumHidSlots) {
+            bt_set_appearance(slot_appearance(slot));
             k_work_reschedule(&sec_retry_work, K_MSEC(600));
         }
 
@@ -773,6 +792,7 @@ extern "C" void on_profile_switch_request() {
 
     auto new_slot = profile_mgr.cycle();
     bt_set_name(slot_device_name(new_slot).data());
+    bt_set_appearance(slot_appearance(new_slot));
     printk("PROFILE: switched to slot %u (%s)\n", new_slot, slot_device_name(new_slot).data());
     hid_update_qdec_trigger();
     LedController::set_connected(hid_is_slot_connected(new_slot));

@@ -193,8 +193,8 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 
 ## 5. Bluetooth Details
 - **Device Names**: `Cam Remote Pro 1`, `Cam Remote Pro 2`, `Cam Remote Pro 3` (HID Slots `0–2`), `Cam Config` (Config Slot `3`) — dynamically updated in both advertising data and GAP Device Name (`0x2A00`).
-- **Appearance**: Keyboard (`961`) — ensures Windows maps Consumer Control and Keyboard/Mouse composite reports natively.
-- **Composite HID Reports**: Three Input Report characteristics under `hog_svc`: Report ID `1` (Consumer Control + AC Back/Forward), Report ID `2` (Mouse Buttons, Vertical Wheel, Horizontal AC Pan), and Report ID `3` (8-byte Standard Keyboard + Modifiers).
+- **Dynamic Appearance & HID Descriptor**: Per-slot automatic HID capability gating (`CONFIG_BT_DEVICE_APPEARANCE_DYNAMIC=y`). Slots without Keyboard mappings (`0x30..0x54`) advertise **Generic HID (`960`)** and omit the Keyboard report from `Report Map (0x2A4B)` so the mobile on-screen touch keyboard remains visible; slots mapped with Keyboard/Arrow/Shortcut actions advertise **Keyboard (`961`)** and expose the Keyboard report.
+- **Composite HID Reports**: Three Input Report characteristics under `hog_svc` dynamically enabled per slot via `Report Map`: Report ID `1` (Consumer Control + AC Back/Forward), Report ID `2` (Mouse Buttons, Vertical Wheel, Horizontal AC Pan), and Report ID `3` (8-byte Standard Keyboard + Modifiers). *(Note: if you toggle Keyboard/Mouse mappings for a slot in `config.html`, forget and re-pair that slot on your host or hold the Main Button for 5s so the OS refreshes its cached HID descriptor.)*
 - **PnP ID**: Vendor `0x05AC`, Product `0x0220` (Apple Vendor ID used for driver-less Windows/iOS compatibility)
 - **Security**: Just Works (`BT_SECURITY_L2`) by default; optional Passkey/MITM (`BT_SECURITY_L4`) via `CONFIG_SAMPLE_BT_USE_AUTHENTICATION=y`.
 - **Advertising Watchdog**: Background worker keeps fast undirected connectable advertising active for the selected slot whenever that slot is unconnected (`CONFIG_BT_MAX_CONN=4` keeps HID slots `0–2` connected across slot switches while Config Slot `3` disconnects on exit).

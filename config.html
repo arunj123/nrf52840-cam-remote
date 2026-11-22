@@ -181,6 +181,27 @@
             color: #fff;
         }
 
+        .preset-btn.featured {
+            grid-column: span 2;
+        }
+
+        .hid-mode-badge {
+            margin-bottom: 1.25rem;
+            padding: 0.65rem 0.85rem;
+            border-radius: 12px;
+            font-size: 0.82rem;
+            line-height: 1.35;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            background: rgba(16, 185, 129, 0.12);
+            color: #a7f3d0;
+        }
+
+        .hid-mode-badge.kbd-active {
+            border-color: rgba(245, 158, 11, 0.45);
+            background: rgba(245, 158, 11, 0.12);
+            color: #fde68a;
+        }
+
         button {
             width: 100%;
             padding: 1rem;
@@ -318,9 +339,12 @@
             <button type="button" class="slot-tab" data-slot="2">Slot 3 (Cam Remote Pro 3)</button>
         </div>
 
+        <div id="hid-mode-badge" class="hid-mode-badge"></div>
+
         <div class="presets-section">
             <span class="presets-label">Quick Slot Presets</span>
             <div class="presets-grid">
+                <button type="button" class="preset-btn featured" data-preset="streaming">🎬 Streaming (Prime / Netflix: Skip ± &amp; Fullscreen)</button>
                 <button type="button" class="preset-btn" data-preset="camera">📷 Camera &amp; Media</button>
                 <button type="button" class="preset-btn" data-preset="scroller">📜 Web / Reels Scroller</button>
                 <button type="button" class="preset-btn" data-preset="presentation">📊 Presentation</button>
@@ -470,10 +494,11 @@
         ];
 
         const PRESETS = {
-            camera:       { label: 'Camera & Media',      cfg: { single: 0x01, long: 0x01, secSingle: 0x08, secLong: 0x10, cw: 0x01, ccw: 0x02, encbtn: 0x04 } },
-            scroller:     { label: 'Web / Reels Scroller', cfg: { single: 0x22, long: 0x27, secSingle: 0x08, secLong: 0x40, cw: 0x21, ccw: 0x22, encbtn: 0x04 } },
-            presentation: { label: 'Presentation',         cfg: { single: 0x38, long: 0x3D, secSingle: 0x37, secLong: 0x32, cw: 0x36, ccw: 0x35, encbtn: 0x30 } },
-            productivity: { label: 'Productivity',         cfg: { single: 0x41, long: 0x42, secSingle: 0x44, secLong: 0x45, cw: 0x49, ccw: 0x4A, encbtn: 0x51 } }
+            streaming:    { label: 'Streaming (Prime / Netflix)', cfg: { single: 0x08, long: 0x3E, secSingle: 0x38, secLong: 0x37, cw: 0x01, ccw: 0x02, encbtn: 0x04 } },
+            camera:       { label: 'Camera & Media',              cfg: { single: 0x01, long: 0x01, secSingle: 0x08, secLong: 0x10, cw: 0x01, ccw: 0x02, encbtn: 0x04 } },
+            scroller:     { label: 'Web / Reels Scroller',        cfg: { single: 0x22, long: 0x27, secSingle: 0x08, secLong: 0x40, cw: 0x21, ccw: 0x22, encbtn: 0x04 } },
+            presentation: { label: 'Presentation',                cfg: { single: 0x38, long: 0x3D, secSingle: 0x37, secLong: 0x32, cw: 0x36, ccw: 0x35, encbtn: 0x30 } },
+            productivity: { label: 'Productivity',                cfg: { single: 0x41, long: 0x42, secSingle: 0x44, secLong: 0x45, cw: 0x49, ccw: 0x4A, encbtn: 0x51 } }
         };
 
         const DEFAULT_SLOT = { ...PRESETS.camera.cfg };
@@ -484,6 +509,24 @@
         ];
         let currentSlot = 0;
 
+        function isMouseKey(val) {
+            return val >= 0x21 && val <= 0x29;
+        }
+
+        function isKeyboardKey(val) {
+            return (val >= 0x30 && val <= 0x3F) || (val >= 0x41 && val <= 0x54);
+        }
+
+        function slotProfileMode(cfg) {
+            const vals = [cfg.single, cfg.long, cfg.cw, cfg.ccw, cfg.encbtn, cfg.secSingle, cfg.secLong];
+            return {
+                usesKbd: vals.some(isKeyboardKey),
+                usesMouse: vals.some(isMouseKey)
+            };
+        }
+
+        let loadedModes = slotMappings.map(slotProfileMode);
+
         let device = null;
         let configChar = null;
 
@@ -493,6 +536,7 @@
         const btnDisconnect = document.getElementById('btn-disconnect');
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
+        const hidModeBadge = document.getElementById('hid-mode-badge');
         const slotTabs = document.querySelectorAll('.slot-tab');
         const presetButtons = document.querySelectorAll('.preset-btn');
 
@@ -537,6 +581,21 @@
             });
         });
 
+        function updateHidModeBadge(slot) {
+            const { usesKbd, usesMouse } = slotProfileMode(slotMappings[slot]);
+            if (usesKbd) {
+                hidModeBadge.classList.add('kbd-active');
+                hidModeBadge.innerText = usesMouse
+                    ? 'HID Mode: Consumer + Mouse + Keyboard (Arrow / Shortcut keys enabled — may hide mobile touch keyboard)'
+                    : 'HID Mode: Consumer + Keyboard (Arrow / Shortcut keys enabled — may hide mobile touch keyboard)';
+            } else {
+                hidModeBadge.classList.remove('kbd-active');
+                hidModeBadge.innerText = usesMouse
+                    ? 'Mobile-Friendly HID: Consumer + Mouse (Keyboard HID disabled — phone touch keyboard stays active)'
+                    : 'Mobile-Friendly HID: Consumer Only (Keyboard HID disabled — phone touch keyboard stays active)';
+            }
+        }
+
         function saveSelectsToSlot(slot) {
             slotMappings[slot] = {
                 single: parseInt(selects.single.value, 10),
@@ -547,6 +606,7 @@
                 secSingle: parseInt(selects.secSingle.value, 10),
                 secLong: parseInt(selects.secLong.value, 10)
             };
+            updateHidModeBadge(slot);
         }
 
         function renderSlot(slot) {
@@ -558,6 +618,7 @@
             selects.cw.value = String(cfg.cw);
             selects.ccw.value = String(cfg.ccw);
             selects.encbtn.value = String(cfg.encbtn);
+            updateHidModeBadge(slot);
         }
 
         populateSelects();
@@ -596,6 +657,7 @@
                 { ...copied },
                 { ...copied }
             ];
+            updateHidModeBadge(currentSlot);
             statusText.innerText = `Copied Slot ${currentSlot} to all 3 slots (click Save to apply)`;
         });
 
@@ -666,6 +728,7 @@
                         ];
                         renderSlot(currentSlot);
                     }
+                    loadedModes = slotMappings.map(slotProfileMode);
                 } catch (e) {
                     console.error("Failed to read current config:", e);
                     if (!device || !device.gatt.connected) {
@@ -734,7 +797,18 @@
                 } else {
                     await configChar.writeValue(data);
                 }
-                statusText.innerText = "Configuration saved for all 3 slots!";
+                const newModes = slotMappings.map(slotProfileMode);
+                const changedSlots = [];
+                for (let s = 0; s < 3; s++) {
+                    if (newModes[s].usesKbd !== loadedModes[s].usesKbd ||
+                        newModes[s].usesMouse !== loadedModes[s].usesMouse) {
+                        changedSlots.push(`Slot ${s + 1}`);
+                    }
+                }
+                loadedModes = newModes;
+                statusText.innerText = changedSlots.length > 0
+                    ? `Saved! HID profile changed on ${changedSlots.join(', ')} — forget & re-pair that slot on your phone/PC (or hold Main Button 5s) so it refreshes.`
+                    : "Configuration saved for all 3 slots!";
             } catch (error) {
                 console.error(error);
                 statusText.innerText = "Error saving configuration: " + error.message;

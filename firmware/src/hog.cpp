@@ -33,6 +33,7 @@ extern "C" void buzzer_beep();
 extern "C" void buzzer_long_beep();
 extern "C" void on_profile_switch_request();
 extern "C" void clear_bonds();
+extern "C" void hid_disconnect_slot(uint8_t slot);
 
 namespace remote {
 
@@ -90,11 +91,13 @@ constexpr size_t kReportLen3 = 8;
 
 uint8_t ctrl_point;
 
-// Composite 3-report HID descriptor:
+// Composite HID descriptor building blocks:
 //   Report ID 1 (1 byte): Consumer Control (Volume Up/Down, Mute, Play/Pause, Next/Prev, AC Back/Forward)
 //   Report ID 2 (5 bytes): Mouse & Scroll Wheel [buttons, dx, dy, wheel, ac_pan]
 //   Report ID 3 (8 bytes): Standard Keyboard [modifiers, reserved, key0..key5]
-constexpr auto report_map = std::to_array<uint8_t>({
+// Each HID slot dynamically serves only the collections required by its configured mappings
+// so mobile slots without Keyboard actions keep the on-screen touch keyboard active.
+constexpr auto kDescConsumer = std::to_array<uint8_t>({
     // ── Report ID 1: Consumer Control ──────────────────────────────
     0x05, 0x0c,       // Usage Page (Consumer)
     0x09, 0x01,       // Usage (Consumer Control)
@@ -114,7 +117,9 @@ constexpr auto report_map = std::to_array<uint8_t>({
     0x0a, 0x25, 0x02, //   Usage (AC Forward)               - 0x80
     0x81, 0x02,       //   Input (Data, Variable, Absolute)
     0xc0,             // End Collection
+});
 
+constexpr auto kDescMouse = std::to_array<uint8_t>({
     // ── Report ID 2: Mouse Buttons + Vertical Wheel + Horizontal Pan ─
     0x05, 0x01,       // Usage Page (Generic Desktop)
     0x09, 0x02,       // Usage (Mouse)
@@ -148,7 +153,9 @@ constexpr auto report_map = std::to_array<uint8_t>({
     0x81, 0x06,       //     Input (Data, Variable, Relative)
     0xc0,             //   End Collection (Physical)
     0xc0,             // End Collection (Application)
+});
 
+constexpr auto kDescKeyboard = std::to_array<uint8_t>({
     // ── Report ID 3: Standard Keyboard & Shortcuts ─────────────────
     0x05, 0x01,       // Usage Page (Generic Desktop)
     0x09, 0x06,       // Usage (Keyboard)
@@ -176,6 +183,29 @@ constexpr auto report_map = std::to_array<uint8_t>({
     0xc0              // End Collection
 });
 
+template <size_t N1, size_t N2>
+constexpr auto concat_desc(const std::array<uint8_t, N1>& a,
+                           const std::array<uint8_t, N2>& b)
+{
+    std::array<uint8_t, N1 + N2> out{};
+    for (size_t i = 0; i < N1; ++i) out[i] = a[i];
+    for (size_t i = 0; i < N2; ++i) out[N1 + i] = b[i];
+    return out;
+}
+
+template <size_t N1, size_t N2, size_t N3>
+constexpr auto concat_desc(const std::array<uint8_t, N1>& a,
+                           const std::array<uint8_t, N2>& b,
+                           const std::array<uint8_t, N3>& c)
+{
+    return concat_desc(concat_desc(a, b), c);
+}
+
+constexpr auto kReportMapConsumerOnly     = kDescConsumer;
+constexpr auto kReportMapConsumerMouse    = concat_desc(kDescConsumer, kDescMouse);
+constexpr auto kReportMapConsumerKeyboard = concat_desc(kDescConsumer, kDescKeyboard);
+constexpr auto kReportMapFull             = concat_desc(kDescConsumer, kDescMouse, kDescKeyboard);
+
 // ─── GATT Callbacks ──────────────────────────────────────────────
 
 ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -188,8 +218,31 @@ ssize_t read_info(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 ssize_t read_report_map(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                         void *buf, uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, report_map.data(),
-                             report_map.size());
+    ARG_UNUSED(attr);
+    uint8_t slot = get_active_profile_id();
+    if (conn) {
+        struct bt_conn_info cinfo;
+        if (bt_conn_get_info(conn, &cinfo) == 0 && cinfo.id >= 1 && cinfo.id <= kNumHidSlots) {
+            slot = static_cast<uint8_t>(cinfo.id - 1);
+        }
+    }
+    const bool use_kbd = HidService::slot_uses_keyboard(slot);
+    const bool use_mouse = HidService::slot_uses_mouse(slot);
+
+    std::span<const uint8_t> map = kReportMapConsumerOnly;
+    if (use_kbd && use_mouse) {
+        map = kReportMapFull;
+    } else if (use_kbd) {
+        map = kReportMapConsumerKeyboard;
+    } else if (use_mouse) {
+        map = kReportMapConsumerMouse;
+    }
+
+    if (offset == 0) {
+        printk("HID: read_report_map slot %u (kbd=%d, mouse=%d, %zu bytes)\n",
+               slot, use_kbd ? 1 : 0, use_mouse ? 1 : 0, map.size());
+    }
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, map.data(), map.size());
 }
 
 ssize_t read_report_ref(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -269,6 +322,12 @@ static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *att
     }
 
     k_mutex_lock(&config_mutex, K_FOREVER);
+    std::array<bool, kNumHidSlots> prev_kbd{};
+    std::array<bool, kNumHidSlots> prev_mouse{};
+    for (size_t s = 0; s < kNumHidSlots; ++s) {
+        prev_kbd[s] = slot_requires_keyboard(g_slot_mappings[s]);
+        prev_mouse[s] = slot_requires_mouse(g_slot_mappings[s]);
+    }
     if (offset == 0 && len == sizeof(ConfigMappings)) {
         // Single-slot 7-byte write updates slot 0
         memcpy(&g_slot_mappings[0], buf, sizeof(ConfigMappings));
@@ -289,6 +348,16 @@ static ssize_t write_config(struct bt_conn *conn, const struct bt_gatt_attr *att
     // Persist to NVS immediately
     if (IS_ENABLED(CONFIG_SETTINGS)) {
         settings_save_one("remote/config/mappings", updated.data(), sizeof(updated));
+    }
+
+    for (uint8_t s = 0; s < kNumHidSlots; ++s) {
+        const bool now_kbd = slot_requires_keyboard(updated[s]);
+        const bool now_mouse = slot_requires_mouse(updated[s]);
+        if (now_kbd != prev_kbd[s] || now_mouse != prev_mouse[s]) {
+            printk("Config: slot %u HID profile changed (kbd=%d, mouse=%d) — re-pair host to refresh cached descriptor\n",
+                   s, now_kbd ? 1 : 0, now_mouse ? 1 : 0);
+            hid_disconnect_slot(s);
+        }
     }
     
     printk("Config: slot mappings updated via BLE and saved to NVS (%u bytes)\n", len);
@@ -518,6 +587,9 @@ static void send_hid_report(uint8_t key_code)
             break;
         }
         case ReportTarget::Mouse: {
+            if (!HidService::slot_uses_mouse(slot)) {
+                break;
+            }
             if (action.mouse_buttons != 0) {
                 k_mutex_lock(&report_mutex, K_FOREVER);
                 active_report_mask |= BIT(1);
@@ -534,6 +606,9 @@ static void send_hid_report(uint8_t key_code)
             break;
         }
         case ReportTarget::Keyboard: {
+            if (!HidService::slot_uses_keyboard(slot)) {
+                break;
+            }
             k_mutex_lock(&report_mutex, K_FOREVER);
             active_report_mask |= BIT(2);
             k_mutex_unlock(&report_mutex);
@@ -880,6 +955,16 @@ ConfigMappings HidService::get_slot_mappings(uint8_t slot)
     const ConfigMappings snapshot = g_slot_mappings[target_slot];
     k_mutex_unlock(&config_mutex);
     return snapshot;
+}
+
+bool HidService::slot_uses_keyboard(uint8_t slot)
+{
+    return (slot < kNumHidSlots) && slot_requires_keyboard(get_slot_mappings(slot));
+}
+
+bool HidService::slot_uses_mouse(uint8_t slot)
+{
+    return (slot < kNumHidSlots) && slot_requires_mouse(get_slot_mappings(slot));
 }
 
 void HidService::set_all_slot_mappings(const AllSlotMappings& mappings)

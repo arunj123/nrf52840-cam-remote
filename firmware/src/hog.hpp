@@ -141,6 +141,18 @@ enum class HidKey : uint8_t {
     return false;
 }
 
+/// Returns true if raw HidKey dispatches to Report ID 2 (Mouse / Scroll Wheel).
+[[nodiscard]] constexpr bool is_mouse_hid_key(HidKey key) noexcept {
+    const uint8_t raw = static_cast<uint8_t>(key);
+    return raw >= 0x21U && raw <= 0x29U;
+}
+
+/// Returns true if raw HidKey dispatches to Report ID 3 (Keyboard / Shortcuts).
+[[nodiscard]] constexpr bool is_keyboard_hid_key(HidKey key) noexcept {
+    const uint8_t raw = static_cast<uint8_t>(key);
+    return (raw >= 0x30U && raw <= 0x3FU) || (raw >= 0x41U && raw <= 0x54U);
+}
+
 /// User-configurable action mappings for a single HID profile slot
 struct ConfigMappings {
     HidKey main_button_single;
@@ -152,6 +164,26 @@ struct ConfigMappings {
     HidKey secondary_button_long;
 };
 static_assert(sizeof(ConfigMappings) == 7, "ConfigMappings must be 7 bytes for BLE/NVS layout");
+
+[[nodiscard]] constexpr bool slot_requires_mouse(const ConfigMappings& cfg) noexcept {
+    return is_mouse_hid_key(cfg.main_button_single) ||
+           is_mouse_hid_key(cfg.main_button_long) ||
+           is_mouse_hid_key(cfg.encoder_cw) ||
+           is_mouse_hid_key(cfg.encoder_ccw) ||
+           is_mouse_hid_key(cfg.encoder_button_short) ||
+           is_mouse_hid_key(cfg.secondary_button_single) ||
+           is_mouse_hid_key(cfg.secondary_button_long);
+}
+
+[[nodiscard]] constexpr bool slot_requires_keyboard(const ConfigMappings& cfg) noexcept {
+    return is_keyboard_hid_key(cfg.main_button_single) ||
+           is_keyboard_hid_key(cfg.main_button_long) ||
+           is_keyboard_hid_key(cfg.encoder_cw) ||
+           is_keyboard_hid_key(cfg.encoder_ccw) ||
+           is_keyboard_hid_key(cfg.encoder_button_short) ||
+           is_keyboard_hid_key(cfg.secondary_button_single) ||
+           is_keyboard_hid_key(cfg.secondary_button_long);
+}
 
 static constexpr ConfigMappings kDefaultConfigMappings = {
     .main_button_single = HidKey::VolumeUp,
@@ -201,6 +233,12 @@ public:
 
     /// Get mappings for a specific HID slot (0..2; out-of-range defaults to slot 0)
     static ConfigMappings get_slot_mappings(uint8_t slot);
+
+    /// True if any action in the given HID slot requires the Keyboard report
+    static bool slot_uses_keyboard(uint8_t slot);
+
+    /// True if any action in the given HID slot requires the Mouse/Scroll report
+    static bool slot_uses_mouse(uint8_t slot);
 
     /// Set mappings for all 3 HID slots
     static void set_all_slot_mappings(const AllSlotMappings& mappings);
