@@ -128,8 +128,57 @@
             transition: border-color 0.2s;
         }
 
+        select option,
+        select optgroup {
+            background-color: #1e293b;
+            color: var(--text);
+        }
+
+        select optgroup {
+            color: #94a3b8;
+            font-weight: 600;
+        }
+
         select:focus {
             border-color: var(--primary);
+        }
+
+        .presets-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .presets-label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .presets-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .preset-btn {
+            padding: 0.55rem 0.65rem;
+            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid var(--border);
+            color: #e2e8f0;
+            font-size: 0.82rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .preset-btn:hover {
+            border-color: var(--accent);
+            background: rgba(16, 185, 129, 0.14);
+            color: #fff;
         }
 
         button {
@@ -187,6 +236,50 @@
             background: rgba(239, 68, 68, 0.35);
         }
 
+        .slot-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .slot-tab {
+            padding: 0.65rem 0.5rem;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .slot-tab:hover {
+            border-color: rgba(129, 140, 248, 0.6);
+            color: var(--text);
+        }
+
+        .slot-tab.active {
+            background: rgba(99, 102, 241, 0.25);
+            border-color: var(--primary);
+            color: #fff;
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
+        }
+
+        #btn-copy-all {
+            background: rgba(99, 102, 241, 0.15);
+            color: #c7d2fe;
+            border: 1px solid rgba(99, 102, 241, 0.35);
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            font-size: 0.9rem;
+        }
+
+        #btn-copy-all:hover {
+            background: rgba(99, 102, 241, 0.3);
+        }
+
         .footer {
             margin-top: 2rem;
             font-size: 0.75rem;
@@ -219,72 +312,62 @@
             Connect to Device
         </button>
 
+        <div class="slot-tabs" role="tablist" aria-label="HID Profile Slots">
+            <button type="button" class="slot-tab active" data-slot="0">Slot 1 (Cam Remote Pro 1)</button>
+            <button type="button" class="slot-tab" data-slot="1">Slot 2 (Cam Remote Pro 2)</button>
+            <button type="button" class="slot-tab" data-slot="2">Slot 3 (Cam Remote Pro 3)</button>
+        </div>
+
+        <div class="presets-section">
+            <span class="presets-label">Quick Slot Presets</span>
+            <div class="presets-grid">
+                <button type="button" class="preset-btn" data-preset="camera">📷 Camera &amp; Media</button>
+                <button type="button" class="preset-btn" data-preset="scroller">📜 Web / Reels Scroller</button>
+                <button type="button" class="preset-btn" data-preset="presentation">📊 Presentation</button>
+                <button type="button" class="preset-btn" data-preset="productivity">💻 Productivity</button>
+            </div>
+        </div>
+
         <div class="config-grid">
             <div class="field">
                 <label>Main Button Single Click</label>
-                <select id="map-single">
-                    <option value="0">None</option>
-                    <option value="1" selected>Volume Up (Shutter)</option>
-                    <option value="2">Volume Down</option>
-                    <option value="4">Mute</option>
-                    <option value="8">Play / Pause</option>
-                    <option value="16">Next Track</option>
-                    <option value="32">Prev Track</option>
-                </select>
+                <select id="map-single"></select>
             </div>
 
             <div class="field">
                 <label>Main Button Long Press</label>
-                <select id="map-long">
-                    <option value="0">None</option>
-                    <option value="1" selected>Volume Up (Burst)</option>
-                    <option value="2">Volume Down</option>
-                    <option value="4">Mute</option>
-                    <option value="8">Play / Pause</option>
-                    <option value="16">Next Track</option>
-                    <option value="32">Prev Track</option>
-                </select>
+                <select id="map-long"></select>
+            </div>
+
+            <div class="field">
+                <label>Second Button Single Click</label>
+                <select id="map-sec-single"></select>
+            </div>
+
+            <div class="field">
+                <label>Second Button Long Press</label>
+                <select id="map-sec-long"></select>
             </div>
 
             <div class="field">
                 <label>Encoder Clockwise</label>
-                <select id="map-cw">
-                    <option value="0">None</option>
-                    <option value="1" selected>Volume Up</option>
-                    <option value="2">Volume Down</option>
-                    <option value="4">Mute</option>
-                    <option value="8">Play / Pause</option>
-                    <option value="16">Next Track</option>
-                    <option value="32">Prev Track</option>
-                </select>
+                <select id="map-cw"></select>
             </div>
 
             <div class="field">
                 <label>Encoder Counter-Clockwise</label>
-                <select id="map-ccw">
-                    <option value="0">None</option>
-                    <option value="1">Volume Up</option>
-                    <option value="2" selected>Volume Down</option>
-                    <option value="4">Mute</option>
-                    <option value="8">Play / Pause</option>
-                    <option value="16">Next Track</option>
-                    <option value="32">Prev Track</option>
-                </select>
+                <select id="map-ccw"></select>
             </div>
 
             <div class="field">
                 <label>Encoder Button Short Press</label>
-                <select id="map-encbtn">
-                    <option value="0">None</option>
-                    <option value="1">Volume Up</option>
-                    <option value="2">Volume Down</option>
-                    <option value="4" selected>Mute</option>
-                    <option value="8">Play / Pause</option>
-                    <option value="16">Next Track</option>
-                    <option value="32">Prev Track</option>
-                </select>
+                <select id="map-encbtn"></select>
             </div>
         </div>
+
+        <button type="button" id="btn-copy-all">
+            Copy to All Slots
+        </button>
 
         <button id="btn-save">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v13a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
@@ -304,22 +387,217 @@
         const SERVICE_UUID = '9e4571a5-b7d9-4daa-a3e5-a8f086007a2b';
         const CONFIG_UUID = 'a427616a-ed05-499d-8072-5f329ed64b3b';
 
+        const HID_OPTION_GROUPS = [
+            {
+                label: null,
+                items: [
+                    [0x00, 'None (Disabled)']
+                ]
+            },
+            {
+                label: 'Camera & Media (Consumer Control)',
+                items: [
+                    [0x01, 'Volume Up (Camera Shutter)'],
+                    [0x02, 'Volume Down'],
+                    [0x04, 'Mute'],
+                    [0x08, 'Play / Pause'],
+                    [0x10, 'Next Track'],
+                    [0x20, 'Previous Track'],
+                    [0x40, 'Browser / App Back'],
+                    [0x80, 'Browser / App Forward']
+                ]
+            },
+            {
+                label: 'Scrolling & Mouse (Wheel & Clicks)',
+                items: [
+                    [0x21, 'Vertical Scroll Up'],
+                    [0x22, 'Vertical Scroll Down'],
+                    [0x23, 'Vertical Scroll Up (Fast)'],
+                    [0x24, 'Vertical Scroll Down (Fast)'],
+                    [0x25, 'Horizontal Scroll Left'],
+                    [0x26, 'Horizontal Scroll Right'],
+                    [0x27, 'Mouse Left Click'],
+                    [0x28, 'Mouse Right Click'],
+                    [0x29, 'Mouse Middle Click']
+                ]
+            },
+            {
+                label: 'Navigation & Presentation Keys',
+                items: [
+                    [0x30, 'Spacebar'],
+                    [0x31, 'Enter'],
+                    [0x32, 'Escape'],
+                    [0x33, 'Tab'],
+                    [0x34, 'Backspace'],
+                    [0x35, 'Up Arrow'],
+                    [0x36, 'Down Arrow'],
+                    [0x37, 'Left Arrow'],
+                    [0x38, 'Right Arrow'],
+                    [0x39, 'Page Up'],
+                    [0x3A, 'Page Down'],
+                    [0x3B, 'Home'],
+                    [0x3C, 'End'],
+                    [0x3D, 'F5 (Start Slideshow / Refresh)'],
+                    [0x3E, 'F Key (Video Fullscreen)'],
+                    [0x3F, 'Print Screen']
+                ]
+            },
+            {
+                label: 'Keyboard Shortcuts (Ctrl / Alt / Win)',
+                items: [
+                    [0x41, 'Copy (Ctrl + C)'],
+                    [0x42, 'Paste (Ctrl + V)'],
+                    [0x43, 'Cut (Ctrl + X)'],
+                    [0x44, 'Undo (Ctrl + Z)'],
+                    [0x45, 'Redo (Ctrl + Y)'],
+                    [0x46, 'Select All (Ctrl + A)'],
+                    [0x47, 'Save (Ctrl + S)'],
+                    [0x48, 'Find (Ctrl + F)'],
+                    [0x49, 'Zoom In (Ctrl + +)'],
+                    [0x4A, 'Zoom Out (Ctrl + -)'],
+                    [0x4B, 'Zoom Reset (Ctrl + 0)'],
+                    [0x4C, 'New Tab (Ctrl + T)'],
+                    [0x4D, 'Close Tab (Ctrl + W)'],
+                    [0x4E, 'Reopen Closed Tab (Ctrl + Shift + T)'],
+                    [0x4F, 'Next Tab (Ctrl + Tab)'],
+                    [0x50, 'Previous Tab (Ctrl + Shift + Tab)'],
+                    [0x51, 'Switch App (Alt + Tab)'],
+                    [0x52, 'Show Desktop (Win + D)'],
+                    [0x53, 'Lock Screen (Win + L)'],
+                    [0x54, 'Snipping Tool (Win + Shift + S)']
+                ]
+            }
+        ];
+
+        const PRESETS = {
+            camera:       { label: 'Camera & Media',      cfg: { single: 0x01, long: 0x01, secSingle: 0x08, secLong: 0x10, cw: 0x01, ccw: 0x02, encbtn: 0x04 } },
+            scroller:     { label: 'Web / Reels Scroller', cfg: { single: 0x22, long: 0x27, secSingle: 0x08, secLong: 0x40, cw: 0x21, ccw: 0x22, encbtn: 0x04 } },
+            presentation: { label: 'Presentation',         cfg: { single: 0x38, long: 0x3D, secSingle: 0x37, secLong: 0x32, cw: 0x36, ccw: 0x35, encbtn: 0x30 } },
+            productivity: { label: 'Productivity',         cfg: { single: 0x41, long: 0x42, secSingle: 0x44, secLong: 0x45, cw: 0x49, ccw: 0x4A, encbtn: 0x51 } }
+        };
+
+        const DEFAULT_SLOT = { ...PRESETS.camera.cfg };
+        let slotMappings = [
+            { ...DEFAULT_SLOT },
+            { ...DEFAULT_SLOT },
+            { ...DEFAULT_SLOT }
+        ];
+        let currentSlot = 0;
+
         let device = null;
         let configChar = null;
 
         const btnConnect = document.getElementById('btn-connect');
+        const btnCopyAll = document.getElementById('btn-copy-all');
         const btnSave = document.getElementById('btn-save');
         const btnDisconnect = document.getElementById('btn-disconnect');
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
+        const slotTabs = document.querySelectorAll('.slot-tab');
+        const presetButtons = document.querySelectorAll('.preset-btn');
 
         const selects = {
             single: document.getElementById('map-single'),
             long: document.getElementById('map-long'),
+            secSingle: document.getElementById('map-sec-single'),
+            secLong: document.getElementById('map-sec-long'),
             cw: document.getElementById('map-cw'),
             ccw: document.getElementById('map-ccw'),
             encbtn: document.getElementById('map-encbtn')
         };
+
+        function populateSelects() {
+            Object.values(selects).forEach((sel) => {
+                sel.innerHTML = '';
+                HID_OPTION_GROUPS.forEach((group) => {
+                    const container = group.label ? document.createElement('optgroup') : sel;
+                    if (group.label) {
+                        container.label = group.label;
+                    }
+                    group.items.forEach(([val, text]) => {
+                        const opt = document.createElement('option');
+                        opt.value = String(val);
+                        opt.textContent = text;
+                        container.appendChild(opt);
+                    });
+                    if (group.label) {
+                        sel.appendChild(container);
+                    }
+                });
+            });
+        }
+
+        presetButtons.forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const preset = PRESETS[btn.dataset.preset];
+                if (!preset) return;
+                slotMappings[currentSlot] = { ...preset.cfg };
+                renderSlot(currentSlot);
+                statusText.innerText = `Applied "${preset.label}" preset to Slot ${currentSlot} (click Save to apply)`;
+            });
+        });
+
+        function saveSelectsToSlot(slot) {
+            slotMappings[slot] = {
+                single: parseInt(selects.single.value, 10),
+                long: parseInt(selects.long.value, 10),
+                cw: parseInt(selects.cw.value, 10),
+                ccw: parseInt(selects.ccw.value, 10),
+                encbtn: parseInt(selects.encbtn.value, 10),
+                secSingle: parseInt(selects.secSingle.value, 10),
+                secLong: parseInt(selects.secLong.value, 10)
+            };
+        }
+
+        function renderSlot(slot) {
+            const cfg = slotMappings[slot];
+            selects.single.value = String(cfg.single);
+            selects.long.value = String(cfg.long);
+            selects.secSingle.value = String(cfg.secSingle);
+            selects.secLong.value = String(cfg.secLong);
+            selects.cw.value = String(cfg.cw);
+            selects.ccw.value = String(cfg.ccw);
+            selects.encbtn.value = String(cfg.encbtn);
+        }
+
+        populateSelects();
+        renderSlot(currentSlot);
+
+        function parseSlot(value, off, stride) {
+            return {
+                single: value.getUint8(off),
+                long: value.getUint8(off + 1),
+                cw: value.getUint8(off + 2),
+                ccw: value.getUint8(off + 3),
+                encbtn: value.getUint8(off + 4),
+                secSingle: stride >= 7 ? value.getUint8(off + 5) : DEFAULT_SLOT.secSingle,
+                secLong: stride >= 7 ? value.getUint8(off + 6) : DEFAULT_SLOT.secLong
+            };
+        }
+
+        slotTabs.forEach((tab) => {
+            tab.addEventListener('click', () => {
+                saveSelectsToSlot(currentSlot);
+                currentSlot = parseInt(tab.dataset.slot, 10);
+                slotTabs.forEach((t) => t.classList.toggle('active', t === tab));
+                renderSlot(currentSlot);
+            });
+        });
+
+        Object.values(selects).forEach((sel) => {
+            sel.addEventListener('change', () => saveSelectsToSlot(currentSlot));
+        });
+
+        btnCopyAll.addEventListener('click', () => {
+            saveSelectsToSlot(currentSlot);
+            const copied = { ...slotMappings[currentSlot] };
+            slotMappings = [
+                { ...copied },
+                { ...copied },
+                { ...copied }
+            ];
+            statusText.innerText = `Copied Slot ${currentSlot} to all 3 slots (click Save to apply)`;
+        });
 
         btnConnect.addEventListener('click', async () => {
             try {
@@ -331,12 +609,15 @@
                     optionalServices: [SERVICE_UUID]
                 });
 
+                device.removeEventListener('gattserverdisconnected', onDisconnected);
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
                 statusText.innerText = "Connecting...";
                 const server = await device.gatt.connect();
                 
-                // Crucial delay: give Windows HID driver time to settle before we retrieve services
-                statusText.innerText = "Waiting for driver handover...";
-                await new Promise(r => setTimeout(r, 2500));
+                // Brief settle delay before GATT service discovery
+                statusText.innerText = "Waiting for GATT service discovery...";
+                await new Promise(r => setTimeout(r, 300));
 
                 let service;
                 for (let attempt = 1; attempt <= 2; attempt++) {
@@ -354,27 +635,56 @@
                 statusText.innerText = "Getting characteristic...";
                 configChar = await service.getCharacteristic(CONFIG_UUID);
 
-                // Read current config
+                // Read current config (21 bytes = 3 slots x 7 bytes, or 15/7/5 legacy)
+                let readError = null;
                 try {
                     const value = await configChar.readValue();
-                    if (value.byteLength >= 5) {
-                        selects.single.value = value.getUint8(0);
-                        selects.long.value = value.getUint8(1);
-                        selects.cw.value = value.getUint8(2);
-                        selects.ccw.value = value.getUint8(3);
-                        selects.encbtn.value = value.getUint8(4);
+                    if (value.byteLength >= 21) {
+                        for (let s = 0; s < 3; s++) {
+                            slotMappings[s] = parseSlot(value, s * 7, 7);
+                        }
+                        renderSlot(currentSlot);
+                    } else if (value.byteLength >= 15) {
+                        for (let s = 0; s < 3; s++) {
+                            slotMappings[s] = parseSlot(value, s * 5, 5);
+                        }
+                        renderSlot(currentSlot);
+                    } else if (value.byteLength >= 7) {
+                        const singleSlot = parseSlot(value, 0, 7);
+                        slotMappings = [
+                            { ...singleSlot },
+                            { ...singleSlot },
+                            { ...singleSlot }
+                        ];
+                        renderSlot(currentSlot);
+                    } else if (value.byteLength >= 5) {
+                        const legacy = parseSlot(value, 0, 5);
+                        slotMappings = [
+                            { ...legacy },
+                            { ...legacy },
+                            { ...legacy }
+                        ];
+                        renderSlot(currentSlot);
                     }
                 } catch (e) {
-                    console.log("Could not read current config (maybe first run)", e);
+                    console.error("Failed to read current config:", e);
+                    if (!device || !device.gatt.connected) {
+                        throw e;
+                    }
+                    readError = e;
+                }
+
+                if (!device || !device.gatt.connected) {
+                    return;
                 }
 
                 statusDot.classList.add('connected');
-                statusText.innerText = "Connected: " + device.name;
+                statusText.innerText = readError
+                    ? `Connected: ${device.name} (Read warning: ${readError.message})`
+                    : `Connected: ${device.name}`;
                 btnConnect.style.display = 'none';
                 btnSave.classList.add('active');
                 btnDisconnect.style.display = 'flex';
-
-                device.addEventListener('gattserverdisconnected', onDisconnected);
 
             } catch (error) {
                 console.error(error);
@@ -404,21 +714,27 @@
             if (!configChar) return;
 
             try {
+                saveSelectsToSlot(currentSlot);
                 statusText.innerText = "Saving configuration...";
-                const data = new Uint8Array([
-                    parseInt(selects.single.value),
-                    parseInt(selects.long.value),
-                    parseInt(selects.cw.value),
-                    parseInt(selects.ccw.value),
-                    parseInt(selects.encbtn.value)
-                ]);
+                const data = new Uint8Array(21);
+                for (let s = 0; s < 3; s++) {
+                    const off = s * 7;
+                    const cfg = slotMappings[s];
+                    data[off] = cfg.single;
+                    data[off + 1] = cfg.long;
+                    data[off + 2] = cfg.cw;
+                    data[off + 3] = cfg.ccw;
+                    data[off + 4] = cfg.encbtn;
+                    data[off + 5] = cfg.secSingle;
+                    data[off + 6] = cfg.secLong;
+                }
 
                 if (configChar.writeValueWithResponse) {
                     await configChar.writeValueWithResponse(data);
                 } else {
                     await configChar.writeValue(data);
                 }
-                statusText.innerText = "Configuration saved!";
+                statusText.innerText = "Configuration saved for all 3 slots!";
             } catch (error) {
                 console.error(error);
                 statusText.innerText = "Error saving configuration: " + error.message;

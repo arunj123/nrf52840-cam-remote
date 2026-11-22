@@ -2,6 +2,8 @@
 
 A Bluetooth Low Energy HID Camera Remote using a Pro Micro nRF52840 / Nice!Nano V2 compatible board and Zephyr RTOS. Triggers a smartphone camera shutter (via Consumer Control Volume Up or custom mapped HID keys) using physical buttons and a rotary encoder.
 
+> **Hardware Reference:** General Nice!Nano V2 / Pro Micro nRF52840 pinouts, schematics, datasheets, power invariants, and flashing guides are centralized in [`../docs/nicenano_nrf52840/README.md`](../docs/nicenano_nrf52840/README.md).
+
 ## 1. Hardware Setup
 
 ### Supported Boards
@@ -17,7 +19,7 @@ The firmware is configured for the following physical connections:
 | :--- | :--- | :--- | :--- |
 | **Pin 5** | **D2** | `P0.10` | Encoder Phase A |
 | **Pin 6** | **D3** | `P1.11` | Encoder Phase B |
-| **Pin 7** | **D4** | `P0.17` | **Trigger 2** |
+| **Pin 7** | **D4** | `P0.17` | **Trigger 2** (Secondary Action) |
 | **Pin 8** | **D5** | `P0.20` | **Trigger 1** (Main Shutter) |
 | **Pin 9** | **D6** | `P0.22` | Buzzer (4kHz PWM) |
 | **Pin 10** | **D7** | `P0.24` | **Encoder Switch** (Mute/Profile) |
@@ -35,21 +37,23 @@ git checkout board-verification
 
 ### LED & Audio Feedback
 - **🔴 Red LED (`P0.15`) + 🔊 Beep (`D6` / `P0.22`)**: Trigger detected (single click = short beep, burst = long beep).
-- **Profile Switch**: `N+1` short beeps when cycling to Slot `N` (Slots `0–2` HID, Slot `3` Config Mode).
+- **Profile Switch**: `N+1` short beeps and red LED blinks when cycling to Slot `N` (Slots `0–2` HID, Slot `3` Config Mode).
 - **Bond Clear (5s hold)**: 3 countdown beeps followed by 1 long beep.
 
 > **Note**: A **passive ceramic piezo buzzer** is driven between **D6 (`P0.22`)** and **GND** using 4 kHz PWM (`H0H1` high-drive). On Nice!Nano clones, the blue LED is hardwired to the TP4054 charger IC (`CHRG`), not the MCU.
 
 ### Click Modes
-| Gesture | Device | Default Action (Custom via `config.html`) | Buzzer Feedback |
-|---------|--------|-------------------------------------------|-----------------|
-| **Press (<0.8s)** | Main Button | Photo / Video Start-Stop (`Volume Up`) | 1 short beep |
-| **Hold (0.8s–5s)** | Main Button | Burst Mode (hold `Volume Up` for 2s) | 1 long beep |
-| **Hold (>=5s)** | Main Button | Clear Active Slot Bond & Rotate BT ID | Countdown + long beep |
+| Gesture | Device | Default Action (Custom per slot via `config.html`) | Buzzer / LED Feedback |
+|---------|--------|----------------------------------------------------|-----------------------|
+| **Press (<0.5s)** | Main Button (`D5`) | Photo / Video Start-Stop (`Volume Up`) | 1 short beep + LED |
+| **Hold (0.5s–5s)** | Main Button (`D5`) | Burst Mode (hold `Volume Up` for 2s) | 1 long beep + LED |
+| **Hold (>=5s)** | Main Button (`D5`) | Clear Active Slot Bond & Rotate BT ID | Countdown + long beep |
+| **Press (<0.5s)** | Second Button (`D4`) | Media Play / Pause (`Play/Pause`) | 1 short beep + LED |
+| **Hold (>=0.5s)** | Second Button (`D4`) | Media Skip Forward (`Next Track`) | 1 long beep + LED |
 | **Rotate C/W** | Encoder | `Volume Up` | None |
 | **Rotate CC/W** | Encoder | `Volume Down` | None |
-| **Press (<0.8s)** | Encoder | `Mute` Toggle | None |
-| **Hold (>=0.8s)** | Encoder | Cycle Slot (`0 → 1 → 2 → 3 → 0`) | `N+1` beeps |
+| **Press (<0.5s)** | Encoder | `Mute` Toggle | None |
+| **Hold (>=0.5s)** | Encoder | Cycle Slot (`0 → 1 → 2 → 3 → 0`) | `N+1` beeps + LED blinks |
 
 > **iPhone**: On iPhone 11+, holding Volume Up triggers QuickTake by default. To enable burst: **Settings > Camera > Use Volume Up for Burst**.
 
@@ -74,7 +78,7 @@ The project is built using **Modern C++** (`C++23` on Zephyr 4.3 / `C++2B` on NC
 - **Standard**: `std::span`, `std::array`, `std::string_view`, `std::optional`, template HAL abstractions (`GestureEngine`, `ProfileManager`)
 - **Logic**: Encapsulated in `remote::HidService`, `remote::BluetoothManager`, `remote::LedController`, `remote::BuzzerController`, and `remote::BatteryMonitor`.
 - **Gesture Logic**: Detailed state transitions and timing are documented in [docs/gesture_logic.md](docs/gesture_logic.md).
-- **Profile**: Consumer Control (Media Remote) via HOGP on Slots `0–2`, plus Web Bluetooth Config Mode (`Cam Config`) on Slot `3` paired with [config.html](config.html).
+- **Profile**: Composite 3-Report HID over GATT (`Consumer Control` + `Mouse Wheel / Pan / Clicks` + `Keyboard & Shortcuts`) on Slots `0–2`, plus Web Bluetooth Config Mode (`Cam Config`) on Slot `3` paired with [config.html](config.html) (includes vertical/horizontal scroll, mouse clicks, navigation keys, shortcuts, and one-click presets).
 - **Pairing**: Just Works encryption (`BT_SECURITY_L2`) by default; Passkey/MITM pairing (`BT_SECURITY_L4`) can be enabled with `CONFIG_SAMPLE_BT_USE_AUTHENTICATION=y`.
 
 ### Developer Rules, Skills & Roadmap
@@ -170,8 +174,8 @@ python -m serial.tools.miniterm COM<X> 115200
 *(Replace `COM<X>` with your actual port. Exit with `Ctrl+]`).*
 
 ### Step 5: Pair & Configure
-1. **Pair HID (Slots 0–2)**: On Android/iOS/Windows, scan and pair with **"Cam Remote Pro"**.
-2. **Configure Mappings (Slot 3)**: Long-press the encoder button (`>= 0.8s`) to cycle to Slot `3` (4 beeps, advertises **"Cam Config"**), open [config.html](config.html) in Chrome/Edge, connect, customize actions, and save to NVS.
+1. **Pair HID (Slots 0–2)**: On Android/iOS/Windows, scan and pair with **"Cam Remote Pro 1"**, **"Cam Remote Pro 2"**, or **"Cam Remote Pro 3"** depending on the active slot (matching `1`, `2`, or `3` beeps/LED blinks).
+2. **Configure Mappings (Slot 3)**: Long-press the encoder button (`>= 0.5s`) to cycle to Slot `3` (4 beeps + LED blinks, advertises **"Cam Config"**), open [config.html](config.html) in Chrome/Edge, connect, customize per-slot actions for Slots `0–2`, and save to NVS.
 
 > **Note**: If you re-flash via SWD (ST-Link), you must **forget/unpair** the device on your phone first. UF2 flashing preserves NVS storage if flash layout is unchanged, though re-pairing may still be needed if keys are cleared.
 
@@ -188,12 +192,13 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 ---
 
 ## 5. Bluetooth Details
-- **Device Names**: `Cam Remote Pro` (HID Slots `0–2`), `Cam Config` (Config Slot `3`)
-- **Appearance**: Keyboard (`961`) — ensures Windows maps Consumer Control buttons natively.
+- **Device Names**: `Cam Remote Pro 1`, `Cam Remote Pro 2`, `Cam Remote Pro 3` (HID Slots `0–2`), `Cam Config` (Config Slot `3`) — dynamically updated in both advertising data and GAP Device Name (`0x2A00`).
+- **Appearance**: Keyboard (`961`) — ensures Windows maps Consumer Control and Keyboard/Mouse composite reports natively.
+- **Composite HID Reports**: Three Input Report characteristics under `hog_svc`: Report ID `1` (Consumer Control + AC Back/Forward), Report ID `2` (Mouse Buttons, Vertical Wheel, Horizontal AC Pan), and Report ID `3` (8-byte Standard Keyboard + Modifiers).
 - **PnP ID**: Vendor `0x05AC`, Product `0x0220` (Apple Vendor ID used for driver-less Windows/iOS compatibility)
 - **Security**: Just Works (`BT_SECURITY_L2`) by default; optional Passkey/MITM (`BT_SECURITY_L4`) via `CONFIG_SAMPLE_BT_USE_AUTHENTICATION=y`.
-- **Advertising Watchdog**: Background worker toggles between directed (to bonded peer) and undirected advertising on bonded HID slots, and keeps undirected advertising active on unbonded slots or Config Mode.
-- **Persistent Bonding & Mappings**: Active slot, per-slot peer addresses, and `ConfigMappings` are stored in NVS.
+- **Advertising Watchdog**: Background worker keeps fast undirected connectable advertising active for the selected slot whenever that slot is unconnected (`CONFIG_BT_MAX_CONN=4` keeps HID slots `0–2` connected across slot switches while Config Slot `3` disconnects on exit).
+- **Persistent Bonding & Mappings**: Active slot, per-slot peer addresses, and per-slot `AllSlotMappings` (`21` bytes covering HID Slots `0–2`) are stored in NVS.
 - **Multi-Device Profiles**: 4 slots total (`0–2` HID devices with separate BLE identities, `3` Web Bluetooth Config Mode); cycle via encoder button long-press.
 
 ---

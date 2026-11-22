@@ -152,9 +152,11 @@ extern "C" void buzzer_countdown_beep() {
 }
 
 // Connection tracking bridge (defined in hog.cpp)
-extern "C" void hid_set_conn(struct bt_conn *conn);
-extern "C" void hid_clear_conn();
-extern "C" void hid_disconnect();
+extern "C" void hid_set_slot_conn(uint8_t slot, struct bt_conn *conn);
+extern "C" void hid_clear_slot_conn(uint8_t slot, struct bt_conn *conn);
+extern "C" void hid_disconnect_slot(uint8_t slot);
+extern "C" bool hid_is_slot_connected(uint8_t slot);
+extern "C" void hid_update_qdec_trigger();
 
 
 
@@ -229,9 +231,32 @@ static int remote_settings_set(const char *name, size_t len, settings_read_cb re
 
     // Handle config/mappings
     if (settings_name_steq(name, "config/mappings", &next) && !next) {
-        ConfigMappings mappings;
-        if (read_cb(cb_arg, &mappings, sizeof(mappings)) > 0) {
-            HidService::set_config_mappings(mappings);
+        uint8_t raw[sizeof(AllSlotMappings)] = {};
+        if (len > sizeof(raw)) {
+            return -EINVAL;
+        }
+        ssize_t n = read_cb(cb_arg, raw, sizeof(raw));
+        if (n == static_cast<ssize_t>(sizeof(AllSlotMappings))) {
+            AllSlotMappings all_mappings;
+            std::memcpy(all_mappings.data(), raw, sizeof(all_mappings));
+            HidService::set_all_slot_mappings(all_mappings);
+            return 0;
+        } else if (n == static_cast<ssize_t>(kLegacyAllSlotMappingsSize)) {
+            // Legacy 15-byte NVS entry (3 x 5 bytes): preserve default secondary button mappings
+            AllSlotMappings all_mappings;
+            for (size_t s = 0; s < kNumHidSlots; ++s) {
+                all_mappings[s] = unpack_legacy_mapping(raw + (s * kLegacyMappingSize));
+            }
+            HidService::set_all_slot_mappings(all_mappings);
+            return 0;
+        } else if (n == static_cast<ssize_t>(sizeof(ConfigMappings))) {
+            ConfigMappings single_mapping;
+            std::memcpy(&single_mapping, raw, sizeof(single_mapping));
+            HidService::set_config_mappings(single_mapping);
+            return 0;
+        } else if (n == static_cast<ssize_t>(kLegacyMappingSize)) {
+            // Legacy 5-byte NVS entry: apply to all 3 HID slots with default secondary actions
+            HidService::set_config_mappings(unpack_legacy_mapping(raw));
             return 0;
         }
     }
@@ -247,12 +272,18 @@ static struct settings_handler remote_conf = {
 extern "C" void on_profile_switch_request();
 
 // ─── Advertising state tracking ─────────────────────────────────
-static volatile bool is_connected = false;
 static volatile bool is_advertising = false;
-static int adv_tick_count = 0;       // Count watchdog ticks to toggle modes
-static bool use_directed_adv = true; // Toggle between directed and undirected
-static int8_t last_adv_id = -1;      // Track which identity was last used for advertising
-static bool last_adv_mode_directed = false;
+static volatile bool suppress_adv_restart = false;
+static int8_t last_adv_id = -1;      // Track which slot was last used for advertising
+
+// Map HID Slots 0..2 to resettable Zephyr BT identities 1..3; Config Slot 3 uses BT_ID_DEFAULT (0)
+static constexpr uint8_t slot_to_bt_id(uint8_t slot) noexcept {
+    return (slot < 3) ? static_cast<uint8_t>(slot + 1) : BT_ID_DEFAULT;
+}
+
+static constexpr uint8_t bt_id_to_slot(uint8_t bt_id) noexcept {
+    return (bt_id >= 1 && bt_id <= 3) ? static_cast<uint8_t>(bt_id - 1) : 3;
+}
 
 // ─── Advertising data (shared between start and watchdog) ───────
 static constexpr uint8_t ad_flags[] = { BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR };
@@ -260,14 +291,16 @@ static constexpr uint8_t ad_uuid[] = {
     BT_UUID_16_ENCODE(BT_UUID_HIDS_VAL),
     BT_UUID_16_ENCODE(BT_UUID_BAS_VAL)
 };
-static constexpr std::string_view dev_name = CONFIG_BT_DEVICE_NAME;
+static constexpr std::array<std::string_view, 4> kSlotNames = {
+    "Cam Remote Pro 1",
+    "Cam Remote Pro 2",
+    "Cam Remote Pro 3",
+    "Cam Config",
+};
 
-// Advertising: HID Mode (Profiles 0-2) — Advertises HIDS and BAS
-static const std::array<struct bt_data, 3> ad_usage = {{
-    { .type = BT_DATA_FLAGS, .data_len = sizeof(ad_flags), .data = ad_flags },
-    { .type = BT_DATA_UUID16_ALL, .data_len = sizeof(ad_uuid), .data = ad_uuid },
-    { .type = BT_DATA_NAME_COMPLETE, .data_len = static_cast<uint8_t>(dev_name.size()), .data = reinterpret_cast<const uint8_t*>(dev_name.data()) },
-}};
+static constexpr std::string_view slot_device_name(uint8_t slot) noexcept {
+    return (slot < kSlotNames.size()) ? kSlotNames[slot] : kSlotNames[0];
+}
 
 static constexpr uint8_t sd_uuid[] = {
     0x2b, 0x7a, 0x00, 0x86, 0xf0, 0xa8, 0xe5, 0xa3,
@@ -275,7 +308,7 @@ static constexpr uint8_t sd_uuid[] = {
 };
 
 // Advertising: Config Mode (Profile 3) — Advertises Custom Service and BAS
-static constexpr std::string_view config_name = "Cam Config";
+static constexpr std::string_view config_name = kSlotNames[3];
 static const std::array<struct bt_data, 2> ad_config = {{
     { .type = BT_DATA_FLAGS, .data_len = sizeof(ad_flags), .data = ad_flags },
     { .type = BT_DATA_UUID128_ALL, .data_len = sizeof(sd_uuid), .data = sd_uuid },
@@ -327,87 +360,77 @@ public:
         .peer = nullptr,
     };
 
-    static int try_advertising(bool force_undirected = false) {
-        auto addr_opt = profile_mgr.active_addr();
-        bool config_mode = profile_mgr.active_slot() == 3;
-        uint8_t current_slot = profile_mgr.active_slot();
-        if (addr_opt && !force_undirected && !config_mode) {
-            bt_addr_le_t target;
-            std::memcpy(&target, addr_opt->data(), 7);
-            
-            char addr_str[BT_ADDR_LE_STR_LEN];
-            bt_addr_le_to_str(&target, addr_str, sizeof(addr_str));
-            // Only print once per mode change to avoid log spam
-            if (adv_tick_count == 0 || !use_directed_adv) {
-                printk("ADV: Directed advertising to %s\n", addr_str);
-            }
-            
-            struct bt_le_adv_param param = {
-                .id = profile_mgr.active_slot(),
-                .sid = 0,
-                .secondary_max_skip = 0,
-                .options = kAdvOptConn | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY | BT_LE_ADV_OPT_DIR_ADDR_RPA,
-                .interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
-                .interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
-                .peer = &target,
-            };
-            
-            return bt_le_adv_start(&param, nullptr, 0, nullptr, 0);
+    static int try_advertising() {
+        const uint8_t current_slot = profile_mgr.active_slot();
+        const uint8_t bt_id = slot_to_bt_id(current_slot);
+        const std::string_view name = slot_device_name(current_slot);
+
+        // Force stop any previous advertising set before starting a new one
+        // This prevents Identity collisions (-EALREADY / -120) when switching slots.
+        bt_le_adv_stop();
+
+        // Keep GAP Device Name (0x2A00) aligned with the active slot
+        bt_set_name(name.data());
+
+        struct bt_le_adv_param param = adv_param_usage;
+        param.id = bt_id;
+
+        const std::array<struct bt_data, 3> ad_usage = {{
+            { .type = BT_DATA_FLAGS, .data_len = sizeof(ad_flags), .data = ad_flags },
+            { .type = BT_DATA_UUID16_ALL, .data_len = sizeof(ad_uuid), .data = ad_uuid },
+            { .type = BT_DATA_NAME_COMPLETE, .data_len = static_cast<uint8_t>(name.size()), .data = reinterpret_cast<const uint8_t*>(name.data()) },
+        }};
+
+        // Select advertising data based on mode
+        const struct bt_data *ad_to_use;
+        size_t ad_len_to_use;
+        const struct bt_data *sd_to_use = nullptr;
+        size_t sd_len_to_use = 0;
+
+        if (current_slot < 3) {
+            ad_to_use = ad_usage.data();
+            ad_len_to_use = ad_usage.size();
         } else {
-            // Force stop any previous advertising set before starting a new one
-            // This prevents Identity collisions (-EALREADY / -120) when switching slots.
-            bt_le_adv_stop();
-
-            struct bt_le_adv_param param = adv_param_usage;
-            param.id = current_slot;
-            
-            // Select advertising data based on mode
-            const struct bt_data *ad_to_use;
-            size_t ad_len_to_use;
-            const struct bt_data *sd_to_use = nullptr;
-            size_t sd_len_to_use = 0;
-            
-            if (current_slot < 3) {
-                ad_to_use = ad_usage.data();
-                ad_len_to_use = ad_usage.size();
-            } else {
-                ad_to_use = ad_config.data();
-                ad_len_to_use = ad_config.size();
-                sd_to_use = sd_config.data();
-                sd_len_to_use = sd_config.size();
-            }
-
-            // Print identity address for debugging
-            bt_addr_le_t id_addrs[CONFIG_BT_ID_MAX];
-            size_t count = CONFIG_BT_ID_MAX;
-            bt_id_get(id_addrs, &count);
-            char addr_str[BT_ADDR_LE_STR_LEN] = "unknown";
-            if (current_slot < count) {
-                bt_addr_le_to_str(&id_addrs[current_slot], addr_str, sizeof(addr_str));
-            }
-            printk("ADV: start slot %d using ID addr %s\n", current_slot, addr_str);
-
-            int err = bt_le_adv_start(&param,
-                                   ad_to_use, ad_len_to_use,
-                                   sd_to_use, sd_len_to_use);
-            if (err && err != -EALREADY) {
-                printk("ADV: start failed (err %d) for slot %u\n", err, current_slot);
-            }
-            return err;
+            ad_to_use = ad_config.data();
+            ad_len_to_use = ad_config.size();
+            sd_to_use = sd_config.data();
+            sd_len_to_use = sd_config.size();
         }
+
+        // Print identity address for debugging
+        bt_addr_le_t id_addrs[CONFIG_BT_ID_MAX];
+        size_t count = CONFIG_BT_ID_MAX;
+        bt_id_get(id_addrs, &count);
+        char addr_str[BT_ADDR_LE_STR_LEN] = "unknown";
+        if (bt_id < count) {
+            bt_addr_le_to_str(&id_addrs[bt_id], addr_str, sizeof(addr_str));
+        }
+        printk("ADV: start slot %u (%s, BT ID %u) using addr %s\n",
+               current_slot, name.data(), bt_id, addr_str);
+
+        int err = bt_le_adv_start(&param,
+                               ad_to_use, ad_len_to_use,
+                               sd_to_use, sd_len_to_use);
+        if (err && err != -EALREADY) {
+            printk("ADV: start failed (err %d) for slot %u\n", err, current_slot);
+        }
+        return err;
     }
 
     static bool start_advertising() {
+        const uint8_t current_slot = profile_mgr.active_slot();
+        if (hid_is_slot_connected(current_slot)) {
+            return true;
+        }
+
         // Stop any existing advertising first
         bt_le_adv_stop();
 
         int err = try_advertising();
         if (!err) {
-            const uint8_t current_slot = profile_mgr.active_slot();
             printk("Advertising started\n");
             is_advertising = true;
             last_adv_id = current_slot;
-            last_adv_mode_directed = (current_slot < 3) && profile_mgr.active_addr().has_value() && use_directed_adv;
             LedController::set_advertising(true);
             return true;
         }
@@ -425,7 +448,6 @@ private:
         }
 
         printk("Bluetooth initialized\n");
-        HidService::init();
 
         profile_mgr.init();
 
@@ -460,19 +482,30 @@ private:
 
         if (err) {
             printk("Connection failed: %s (0x%02x)\n", addr, err);
-            is_connected = false;
             is_advertising = false;
-            // The watchdog will restart advertising safely
-            k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+            if (!suppress_adv_restart) {
+                k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+            }
             return;
         }
 
-        printk("Connected: %s\n", addr);
-        is_connected = true;
+        struct bt_conn_info info;
+        uint8_t slot = profile_mgr.active_slot();
+        uint8_t bt_id = slot_to_bt_id(slot);
+        if (bt_conn_get_info(conn, &info) == 0) {
+            bt_id = info.id;
+            slot = bt_id_to_slot(bt_id);
+        }
+
+        printk("Connected (slot %u, BT ID %u): %s\n", slot, bt_id, addr);
         is_advertising = false;
-        hid_set_conn(conn);
+        hid_set_slot_conn(slot, conn);
         LedController::set_connected(true);
         LedController::set_advertising(false);
+
+        if (!suppress_adv_restart && !hid_is_slot_connected(profile_mgr.active_slot())) {
+            k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+        }
 
         // We stop initiating security from the nRF side.
         // Windows and Web Bluetooth will request it automatically when they access 
@@ -483,14 +516,21 @@ private:
         char addr[BT_ADDR_LE_STR_LEN];
         bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
-        printk("Disconnected: %s (reason 0x%02x)\n", addr, reason);
-        is_connected = false;
-        hid_clear_conn();
-        LedController::set_connected(false);
+        struct bt_conn_info info;
+        uint8_t slot = profile_mgr.active_slot();
+        if (bt_conn_get_info(conn, &info) == 0) {
+            slot = bt_id_to_slot(info.id);
+        }
+
+        printk("Disconnected (slot %u): %s (reason 0x%02x)\n", slot, addr, reason);
+        hid_clear_slot_conn(slot, conn);
+        LedController::set_connected(hid_is_slot_connected(profile_mgr.active_slot()));
         // Do not call start_advertising() directly here to avoid err -12 (ENOMEM)
         // arising from executing HCI commands inside the disconnect callback context.
         // Instead, schedule the watchdog to run after a tiny delay to allow internal cleanup.
-        k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+        if (!suppress_adv_restart) {
+            k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+        }
     }
 
     static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
@@ -507,10 +547,16 @@ private:
     static void pairing_complete(struct bt_conn *conn, bool bonded) {
         if (bonded) {
             struct bt_conn_info info;
-            if (bt_conn_get_info(conn, &info) == 0 && profile_mgr.active_slot() < 3) {
-                const bt_addr_le_t *addr = info.le.dst;
-                profile_mgr.update_active_addr(reinterpret_cast<const uint8_t*>(addr));
-                printk("REL: Bond established, identity address saved to slot %u\n", profile_mgr.active_slot());
+            if (bt_conn_get_info(conn, &info) == 0) {
+                const uint8_t slot = bt_id_to_slot(info.id);
+                if (slot < 3) {
+                    const bt_addr_le_t *addr = info.le.dst;
+                    char key[32];
+                    std::snprintf(key, sizeof(key), "profile/slot%u/addr", slot);
+                    profile_mgr.set_slot_addr(slot, reinterpret_cast<const uint8_t*>(addr));
+                    NvsStorageHal::store_addr(key, reinterpret_cast<const uint8_t*>(addr));
+                    printk("REL: Bond established, identity address saved to slot %u\n", slot);
+                }
             }
         }
     }
@@ -544,53 +590,39 @@ private:
 static void adv_watchdog_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    // If connected, no need to advertise — just reschedule
-    if (is_connected) {
-        adv_tick_count = 0;
+    const uint8_t current_slot = profile_mgr.active_slot();
+
+    // If the currently active slot is already connected, keep advertising stopped.
+    if (hid_is_slot_connected(current_slot)) {
+        if (is_advertising) {
+            bt_le_adv_stop();
+            is_advertising = false;
+            LedController::set_advertising(false);
+        }
         k_work_reschedule(&adv_watchdog_work, K_SECONDS(kAdvWatchdogIntervalSec));
         return;
     }
 
-    uint8_t current_id = profile_mgr.active_slot();
-    const bool has_bond = (current_id < 3) && profile_mgr.active_addr().has_value();
-    bool should_be_directed = has_bond && use_directed_adv;
-
-    // Toggle logic: if we have a bond, swap between directed and undirected every 20 seconds (4 ticks)
-    if (has_bond) {
-        adv_tick_count++;
-        if (adv_tick_count > 4) {
-            adv_tick_count = 0;
-            use_directed_adv = !use_directed_adv;
-            should_be_directed = use_directed_adv;
-            printk("ADV watchdog: Toggle mode to %s\n", should_be_directed ? "directed" : "undirected");
-            bt_le_adv_stop(); // Force restart in new mode
-            is_advertising = false;
-        }
-    } else {
-        adv_tick_count = 0;
-    }
-
-    // Force identity switch if needed (Restart if Slot or Mode changed)
-    if (is_advertising && (current_id != last_adv_id || should_be_directed != last_adv_mode_directed)) {
-        printk("ADV watchdog: Profile/Mode changed (%d -> %d), restarting adv\n", last_adv_id, current_id);
+    // Force identity switch if needed (Restart if Slot changed while advertising an older slot)
+    if (is_advertising && current_slot != last_adv_id) {
+        printk("ADV watchdog: Profile changed (%d -> %u), restarting adv\n", last_adv_id, current_slot);
         bt_le_adv_stop();
         is_advertising = false;
     }
 
-    // Only start/restart advertising if not already actively advertising in the desired slot/mode
+    // Only start/restart advertising if not already actively advertising in the desired slot
     if (!is_advertising) {
-        int err = BluetoothManager::try_advertising(!should_be_directed);
+        int err = BluetoothManager::try_advertising();
 
         if (err == 0 || err == -EALREADY) {
             // Double-check we didn't connect asynchronously while try_advertising was blocking
-            if (!is_connected) {
+            if (!hid_is_slot_connected(current_slot)) {
                 is_advertising = true;
-                last_adv_id = current_id;
-                last_adv_mode_directed = should_be_directed;
+                last_adv_id = current_slot;
                 LedController::set_advertising(true);
             }
         } else {
-            printk("ADV watchdog: adv start err %d (slot %u)\n", err, current_id);
+            printk("ADV watchdog: adv start err %d (slot %u)\n", err, current_slot);
             is_advertising = false;
             LedController::set_advertising(false);
             bt_le_adv_stop();
@@ -601,25 +633,31 @@ static void adv_watchdog_handler(struct k_work *work)
 }
 
 extern "C" void clear_bonds() {
-    uint8_t id = profile_mgr.active_slot();
-    printk("REL: Clearing bonds and ROTATING identity address for slot %u\n", id);
-    
-    // 1. Unpair
-    bt_unpair(id, NULL);
+    const uint8_t slot = profile_mgr.active_slot();
+    const uint8_t bt_id = slot_to_bt_id(slot);
+    printk("REL: Clearing bonds and ROTATING identity address for slot %u (BT ID %u)\n", slot, bt_id);
 
-    // 2. Stop everything and disconnect
+    suppress_adv_restart = true;
+    k_work_cancel_delayable(&adv_watchdog_work);
+
+    // 1. Stop advertising and disconnect active link for this slot before mutating identity/keys
     bt_le_adv_stop();
     is_advertising = false;
-    hid_disconnect();
-    
-    // 3. Reset identity in-place (IDs > 0) to change the random address
-    // This forces Windows to see it as a brand new device without losing the slot.
-    if (id > 0) {
-        int reset_res = bt_id_reset(id, nullptr, nullptr);
+    hid_disconnect_slot(slot);
+
+    for (int waited = 0; waited < 500 && hid_is_slot_connected(slot); waited += 20) {
+        k_msleep(20);
+    }
+
+    // 2. Unpair and rotate identity in-place (HID slots 0..2 map to BT IDs 1..3)
+    bt_unpair(bt_id, NULL);
+
+    if (bt_id > 0) {
+        int reset_res = bt_id_reset(bt_id, nullptr, nullptr);
         if (reset_res < 0) {
-            printk("Failed to reset BT ID %u (err %d)\n", id, reset_res);
+            printk("Failed to reset BT ID %u (err %d)\n", bt_id, reset_res);
         } else {
-            printk("Reset BT ID %d for slot %u\n", reset_res, id);
+            printk("Reset BT ID %d for slot %u\n", reset_res, slot);
         }
     }
     
@@ -628,39 +666,44 @@ extern "C" void clear_bonds() {
     
     // Visual/Audio feedback
     BuzzerController::countdown_beep();
-    
-    adv_tick_count = 0;
-    use_directed_adv = false; // Start with undirected to be seen
-    
+
+    suppress_adv_restart = false;
+
     // Trigger watchdog immediately
     k_work_reschedule(&adv_watchdog_work, K_MSEC(100));
 }
 
 extern "C" void on_profile_switch_request() {
-    auto new_slot = profile_mgr.cycle();
-    printk("PROFILE: switched to slot %u\n", new_slot);
+    const uint8_t old_slot = profile_mgr.active_slot();
 
-    // Buzzer feedback: beep N+1 times for slot N
-    for (uint8_t i = 0; i <= new_slot; ++i) {
-        BuzzerController::beep();
-        if (i < new_slot) k_msleep(150);
-    }
-
-    // Explicitly stop advertising to ensure the identity change is applied
+    // Cancel pending watchdog and stop advertising before sleeping for feedback
+    suppress_adv_restart = true;
+    k_work_cancel_delayable(&adv_watchdog_work);
     bt_le_adv_stop();
     is_advertising = false;
 
-    // Disconnect current connection so we can re-advertise to the new slot's peer
-    hid_disconnect();
-    
-    // Reset watchdog ticks so we start fresh with the new profile
-    adv_tick_count = 0;
-    use_directed_adv = true; 
-
-    // Trigger watchdog immediately if not connected, otherwise wait for disconnect callback
-    if (!is_connected) {
-        k_work_reschedule(&adv_watchdog_work, K_MSEC(100));
+    // Keep HID slots (0..2) connected across slot switches; only disconnect Slot 3 (Cam Config) on exit
+    if (old_slot == 3 && hid_is_slot_connected(3)) {
+        hid_disconnect_slot(3);
     }
+
+    auto new_slot = profile_mgr.cycle();
+    bt_set_name(slot_device_name(new_slot).data());
+    printk("PROFILE: switched to slot %u (%s)\n", new_slot, slot_device_name(new_slot).data());
+    hid_update_qdec_trigger();
+    LedController::set_connected(hid_is_slot_connected(new_slot));
+
+    // Synchronized visual + audio feedback: N+1 blinks and beeps for slot N
+    for (uint8_t i = 0; i <= new_slot; ++i) {
+        LedController::set_trigger_active(true);
+        BuzzerController::beep();
+        LedController::set_trigger_active(false);
+        if (i < new_slot) k_msleep(150);
+    }
+
+    suppress_adv_restart = false;
+
+    k_work_reschedule(&adv_watchdog_work, K_MSEC(100));
 }
 
 } // namespace remote
@@ -675,6 +718,7 @@ int main() {
     remote::LedController::init();
     remote::PowerController::init();
     remote::BuzzerController::init();
+    remote::HidService::init();
     remote::BluetoothManager::start();
     remote::BatteryMonitor::init();
     remote::BatteryMonitor::start_periodic();

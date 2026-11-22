@@ -1,6 +1,6 @@
 # Coding Standards
 
-This document defines the language and framework standards for the nRF52840 project.
+This document extends the shared [`../../.agents/rules/embedded_cpp.md`](../../.agents/rules/embedded_cpp.md) rules for the `nrf_control` nRF52840 project.
 
 ## 1. Language & Framework
 - **Language**: Modern C++ (Target: **C++23**).
