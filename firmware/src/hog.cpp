@@ -474,6 +474,7 @@ static void send_hid_report(uint8_t key_code)
     k_mutex_unlock(&conn_mutex);
 
     if (!conn) {
+        printk("HID: slot %u not connected (drop 0x%02x)\n", slot, key_code);
         return;
     }
 
@@ -506,6 +507,7 @@ static void send_hid_report(uint8_t key_code)
         return;
     }
 
+    printk("HID: notify key 0x%02x (slot %u)\n", key_code, slot);
     const DecodedHidAction action = decode_hid_action(static_cast<HidKey>(key_code));
     switch (action.target) {
         case ReportTarget::Consumer: {
@@ -693,7 +695,7 @@ void encoder_rot_thread(void *, void *, void *)
         if (sensor_sample_fetch(qdec_dev) == 0 &&
             sensor_channel_get(qdec_dev, SENSOR_CHAN_ROTATION, &val) == 0 &&
             val.val1 != 0) {
-            printk("Woke up (Encoder)!\n");
+            printk("Woke up (Encoder)! (%d deg)\n", val.val1);
             Engine::on_encoder_rotate(val.val1);
             printk("Zzz... Sleeping (Encoder)\n");
         }
@@ -715,22 +717,32 @@ extern "C" bool hid_is_slot_connected(uint8_t slot)
     return connected;
 }
 
+extern "C" struct bt_conn *hid_get_slot_conn_ref(uint8_t slot)
+{
+    if (slot >= kTotalSlots) {
+        return nullptr;
+    }
+    struct bt_conn *conn = nullptr;
+    k_mutex_lock(&conn_mutex, K_FOREVER);
+    if (slot_conns[slot]) {
+        conn = bt_conn_ref(slot_conns[slot]);
+    }
+    k_mutex_unlock(&conn_mutex);
+    return conn;
+}
+
 extern "C" void hid_update_qdec_trigger()
 {
-    if (!device_is_ready(qdec_dev)) {
+    Engine::reset();
+    if (!device_is_ready(qdec_dev) || qdec_trigger_active) {
         return;
     }
-    const uint8_t active_slot = get_active_profile_id();
-    const bool should_enable = (active_slot < kNumHidSlots) && hid_is_slot_connected(active_slot);
-    if (should_enable == qdec_trigger_active) {
-        return;
-    }
-    int err = sensor_trigger_set(qdec_dev, &qdec_trig, should_enable ? qdec_trigger_handler : nullptr);
+    int err = sensor_trigger_set(qdec_dev, &qdec_trig, qdec_trigger_handler);
     if (err) {
-        printk("QDEC: failed to %s trigger (err %d)\n", should_enable ? "set" : "clear", err);
+        printk("QDEC: failed to set trigger (err %d)\n", err);
     } else {
-        qdec_trigger_active = should_enable;
-        printk("QDEC: trigger %s\n", should_enable ? "registered" : "cleared");
+        qdec_trigger_active = true;
+        printk("QDEC: trigger registered\n");
     }
 }
 
@@ -773,10 +785,10 @@ extern "C" void hid_disconnect_slot(uint8_t slot)
     }
 }
 
-extern "C" void hid_clear_slot_conn(uint8_t slot, struct bt_conn *conn)
+extern "C" bool hid_clear_slot_conn(uint8_t slot, struct bt_conn *conn)
 {
     if (slot >= kTotalSlots) {
-        return;
+        return false;
     }
     struct bt_conn *old_conn = nullptr;
     k_mutex_lock(&conn_mutex, K_FOREVER);
@@ -789,8 +801,10 @@ extern "C" void hid_clear_slot_conn(uint8_t slot, struct bt_conn *conn)
     if (old_conn) {
         bt_conn_unref(old_conn);
         printk("HID: slot %u conn cleared\n", slot);
+        hid_update_qdec_trigger();
+        return true;
     }
-    hid_update_qdec_trigger();
+    return false;
 }
 
 // ─── Public API ──────────────────────────────────────────────────
@@ -823,6 +837,14 @@ void HidService::init()
 
     if (!device_is_ready(qdec_dev)) {
         printk("QDEC sensor not ready\n");
+    } else {
+        int err = sensor_trigger_set(qdec_dev, &qdec_trig, qdec_trigger_handler);
+        if (err) {
+            printk("QDEC: failed to set trigger (err %d)\n", err);
+        } else {
+            qdec_trigger_active = true;
+            printk("QDEC: trigger registered\n");
+        }
     }
 }
 

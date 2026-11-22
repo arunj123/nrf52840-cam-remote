@@ -153,9 +153,10 @@ extern "C" void buzzer_countdown_beep() {
 
 // Connection tracking bridge (defined in hog.cpp)
 extern "C" void hid_set_slot_conn(uint8_t slot, struct bt_conn *conn);
-extern "C" void hid_clear_slot_conn(uint8_t slot, struct bt_conn *conn);
+extern "C" bool hid_clear_slot_conn(uint8_t slot, struct bt_conn *conn);
 extern "C" void hid_disconnect_slot(uint8_t slot);
 extern "C" bool hid_is_slot_connected(uint8_t slot);
+extern "C" struct bt_conn *hid_get_slot_conn_ref(uint8_t slot);
 extern "C" void hid_update_qdec_trigger();
 
 
@@ -200,6 +201,8 @@ struct NvsStorageHal {
 };
 
 static ProfileManager<NvsStorageHal, 4> profile_mgr;
+static constexpr uint8_t kCurrentSchemaVer = 2;
+static uint8_t g_schema_ver = 0;
 
 extern "C" uint8_t get_active_profile_id() {
     return remote::profile_mgr.active_slot();
@@ -208,6 +211,14 @@ extern "C" uint8_t get_active_profile_id() {
 // ─── Settings Handler ───────────────────────────────────────────
 static int remote_settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg) {
     const char *next;
+    if (settings_name_steq(name, "schema_ver", &next) && !next) {
+        uint8_t val;
+        if (read_cb(cb_arg, &val, sizeof(val)) > 0) {
+            g_schema_ver = val;
+            return 0;
+        }
+    }
+
     if (settings_name_steq(name, "profile/slot", &next) && !next) {
         uint8_t val;
         if (read_cb(cb_arg, &val, sizeof(val)) > 0) {
@@ -318,15 +329,18 @@ static const std::array<struct bt_data, 1> sd_config = {{
     { .type = BT_DATA_NAME_COMPLETE, .data_len = static_cast<uint8_t>(config_name.size()), .data = reinterpret_cast<const uint8_t*>(config_name.data()) },
 }};
 
-// ─── Advertising watchdog (forward declaration) ─────────────────
+// ─── Advertising watchdog & security retry (forward declarations) 
 static void adv_watchdog_handler(struct k_work *work);
+static void sec_retry_handler(struct k_work *work);
 static struct k_work_delayable adv_watchdog_work;
+static struct k_work_delayable sec_retry_work;
 constexpr int kAdvWatchdogIntervalSec = 5;
 
 class BluetoothManager {
 public:
     static int start() {
         k_work_init_delayable(&adv_watchdog_work, adv_watchdog_handler);
+        k_work_init_delayable(&sec_retry_work, sec_retry_handler);
 
         int err = settings_subsys_init();
         if (err) {
@@ -349,12 +363,12 @@ public:
         }
         return 0;
     }
-    // Advertising parameters for regular HID usage (Fast, Connectable, Scannable)
+    // Advertising parameters for regular HID usage (Fast, Connectable, Scannable, One-Time)
     static constexpr struct bt_le_adv_param adv_param_usage = {
         .id = BT_ID_DEFAULT,
         .sid = 0,
         .secondary_max_skip = 0,
-        .options = kAdvOptConn | BT_LE_ADV_OPT_SCANNABLE,
+        .options = kAdvOptConn | BT_LE_ADV_OPT_SCANNABLE | BT_LE_ADV_OPT_ONE_TIME,
         .interval_min = BT_GAP_ADV_FAST_INT_MIN_1,
         .interval_max = BT_GAP_ADV_FAST_INT_MAX_1,
         .peer = nullptr,
@@ -467,6 +481,27 @@ private:
             id_count++;
         }
 
+        if (IS_ENABLED(CONFIG_SETTINGS) && g_schema_ver != kCurrentSchemaVer) {
+            printk("MIGRATION: schema %u -> %u, resetting HID slots 0..2 bonds & IDs\n",
+                   g_schema_ver, kCurrentSchemaVer);
+            const uint8_t zero_addr[7] = {};
+            for (uint8_t s = 0; s < kNumHidSlots; ++s) {
+                const uint8_t id = slot_to_bt_id(s);
+                bt_unpair(id, nullptr);
+                int reset_res = bt_id_reset(id, nullptr, nullptr);
+                if (reset_res < 0) {
+                    printk("MIGRATION: bt_id_reset(%u) err %d\n", id, reset_res);
+                }
+                char key[32];
+                std::snprintf(key, sizeof(key), "profile/slot%u/addr", s);
+                profile_mgr.set_slot_addr(s, zero_addr);
+                NvsStorageHal::store_addr(key, zero_addr);
+            }
+            profile_mgr.set_slot(0);
+            g_schema_ver = kCurrentSchemaVer;
+            NvsStorageHal::store("schema_ver", g_schema_ver);
+        }
+
         printk("Profile manager ready (slot %u)\n", profile_mgr.active_slot());
 
         const bool adv_ok = start_advertising();
@@ -497,19 +532,28 @@ private:
             slot = bt_id_to_slot(bt_id);
         }
 
+        if (hid_is_slot_connected(slot)) {
+            printk("WARN: slot %u already connected, disconnecting duplicate %s\n", slot, addr);
+            bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
+            return;
+        }
+
         printk("Connected (slot %u, BT ID %u): %s\n", slot, bt_id, addr);
+        bt_le_adv_stop();
         is_advertising = false;
         hid_set_slot_conn(slot, conn);
         LedController::set_connected(true);
         LedController::set_advertising(false);
 
+        if (slot < kNumHidSlots) {
+            k_work_reschedule(&sec_retry_work, K_MSEC(600));
+        }
+
         if (!suppress_adv_restart && !hid_is_slot_connected(profile_mgr.active_slot())) {
             k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
         }
 
-        // We stop initiating security from the nRF side.
-        // Windows and Web Bluetooth will request it automatically when they access 
-        // encrypted characteristics. This avoids races with the Windows HID driver.
+        // Security fallback is scheduled via sec_retry_work after 600ms if host stays at L1.
     }
 
     static void disconnected(struct bt_conn *conn, uint8_t reason) {
@@ -523,13 +567,14 @@ private:
         }
 
         printk("Disconnected (slot %u): %s (reason 0x%02x)\n", slot, addr, reason);
-        hid_clear_slot_conn(slot, conn);
-        LedController::set_connected(hid_is_slot_connected(profile_mgr.active_slot()));
-        // Do not call start_advertising() directly here to avoid err -12 (ENOMEM)
-        // arising from executing HCI commands inside the disconnect callback context.
-        // Instead, schedule the watchdog to run after a tiny delay to allow internal cleanup.
-        if (!suppress_adv_restart) {
-            k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+        if (hid_clear_slot_conn(slot, conn)) {
+            LedController::set_connected(hid_is_slot_connected(profile_mgr.active_slot()));
+            // Do not call start_advertising() directly here to avoid err -12 (ENOMEM)
+            // arising from executing HCI commands inside the disconnect callback context.
+            // Instead, schedule the watchdog to run after a tiny delay to allow internal cleanup.
+            if (!suppress_adv_restart) {
+                k_work_reschedule(&adv_watchdog_work, K_MSEC(250));
+            }
         }
     }
 
@@ -539,8 +584,17 @@ private:
 
         if (!err) {
             printk("Security changed: %s level %u\n", addr, level);
-        } else {
-            printk("Security failed: %s level %u err %d\n", addr, level, static_cast<int>(err));
+            return;
+        }
+
+        printk("Security failed: %s level %u err %d\n", addr, level, static_cast<int>(err));
+        if (err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING || err == BT_SECURITY_ERR_AUTH_FAIL) {
+            struct bt_conn_info info;
+            if (bt_conn_get_info(conn, &info) == 0 && bt_id_to_slot(info.id) < kNumHidSlots) {
+                bt_unpair(info.id, info.le.dst);
+                int sec_err = bt_conn_set_security(conn, BT_SECURITY_L2);
+                printk("SEC: cleared stale bond on BT ID %u, retrying L2 (err %d)\n", info.id, sec_err);
+            }
         }
     }
 
@@ -561,6 +615,19 @@ private:
         }
     }
 
+    static void bond_deleted(uint8_t id, const bt_addr_le_t *peer) {
+        ARG_UNUSED(peer);
+        const uint8_t slot = bt_id_to_slot(id);
+        if (slot < kNumHidSlots) {
+            const uint8_t zero_addr[7] = {};
+            char key[32];
+            std::snprintf(key, sizeof(key), "profile/slot%u/addr", slot);
+            profile_mgr.set_slot_addr(slot, zero_addr);
+            NvsStorageHal::store_addr(key, zero_addr);
+            printk("REL: Bond deleted on slot %u (BT ID %u)\n", slot, id);
+        }
+    }
+
     static inline bt_conn_cb conn_callbacks = {
         .connected = connected,
         .disconnected = disconnected,
@@ -569,6 +636,7 @@ private:
 
     static inline bt_conn_auth_info_cb auth_info_callbacks = {
         .pairing_complete = pairing_complete,
+        .bond_deleted = bond_deleted,
     };
 
     static inline bt_conn_auth_cb auth_cb = {
@@ -587,18 +655,34 @@ private:
 
 // ─── Implementation of handlers ─────────────────────────────────
 
+static void sec_retry_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    const uint8_t slot = profile_mgr.active_slot();
+    if (slot >= kNumHidSlots) {
+        return;
+    }
+    struct bt_conn *conn = hid_get_slot_conn_ref(slot);
+    if (!conn) {
+        return;
+    }
+    if (bt_conn_get_security(conn) < BT_SECURITY_L2) {
+        int err = bt_conn_set_security(conn, BT_SECURITY_L2);
+        printk("SEC: slot %u security request (err %d)\n", slot, err);
+    }
+    bt_conn_unref(conn);
+}
+
 static void adv_watchdog_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
     const uint8_t current_slot = profile_mgr.active_slot();
 
-    // If the currently active slot is already connected, keep advertising stopped.
+    // If the currently active slot is already connected, ensure advertising stays stopped.
     if (hid_is_slot_connected(current_slot)) {
-        if (is_advertising) {
-            bt_le_adv_stop();
-            is_advertising = false;
-            LedController::set_advertising(false);
-        }
+        bt_le_adv_stop();
+        is_advertising = false;
+        LedController::set_advertising(false);
         k_work_reschedule(&adv_watchdog_work, K_SECONDS(kAdvWatchdogIntervalSec));
         return;
     }

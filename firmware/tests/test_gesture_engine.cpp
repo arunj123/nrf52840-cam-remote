@@ -8,8 +8,10 @@ using remote::HidKey;
 struct MockState {
     uint64_t time_ms = 0;
     bool button_held = false;
+    uint64_t bounce_settle_time_ms = 0;
     uint64_t release_time_ms = 0;
     bool secondary_button_held = false;
+    uint64_t secondary_bounce_settle_time_ms = 0;
     uint64_t secondary_release_time_ms = 0;
     bool encoder_button_held = false;
     uint64_t encoder_release_time_ms = 0;
@@ -28,8 +30,10 @@ struct MockState {
     void reset() {
         time_ms = 0;
         button_held = false;
+        bounce_settle_time_ms = 0;
         release_time_ms = 0;
         secondary_button_held = false;
+        secondary_bounce_settle_time_ms = 0;
         secondary_release_time_ms = 0;
         encoder_button_held = false;
         encoder_release_time_ms = 0;
@@ -53,6 +57,14 @@ struct MockHal {
     static uint64_t get_time_ms() { return state.time_ms; }
     static void sleep_ms(int ms) { 
         state.time_ms += ms; 
+        if (state.bounce_settle_time_ms > 0 && state.time_ms >= state.bounce_settle_time_ms) {
+            state.button_held = true;
+            state.bounce_settle_time_ms = 0;
+        }
+        if (state.secondary_bounce_settle_time_ms > 0 && state.time_ms >= state.secondary_bounce_settle_time_ms) {
+            state.secondary_button_held = true;
+            state.secondary_bounce_settle_time_ms = 0;
+        }
         if (state.button_held && state.time_ms >= state.release_time_ms) {
             state.button_held = false;
         }
@@ -402,4 +414,28 @@ TEST_F(GestureEngineTest, DispatchesScrollAndKeyboardShortcuts) {
     ASSERT_EQ(state.sent_reports.size(), 2);
     EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::KeySpace));
     EXPECT_EQ(state.sent_reports[1], 0x00);
+}
+
+TEST_F(GestureEngineTest, InitialContactBounceAtWakeIsNotDropped) {
+    // Main button reads inactive at t=0 during initial make-bounce, then settles active before debounce completes
+    state.button_held = false;
+    state.bounce_settle_time_ms = state.time_ms + 4;
+    state.release_time_ms = state.time_ms + 100;
+    TestEngine::on_main_button_wake();
+    ASSERT_EQ(state.sent_reports.size(), 2);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::VolumeUp));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+    EXPECT_EQ(state.beep_count, 1);
+
+    // Secondary button reads inactive at t=0 during initial make-bounce, then settles active before debounce completes
+    state.sent_reports.clear();
+    state.beep_count = 0;
+    state.secondary_button_held = false;
+    state.secondary_bounce_settle_time_ms = state.time_ms + 4;
+    state.secondary_release_time_ms = state.time_ms + 100;
+    TestEngine::on_secondary_button_wake();
+    ASSERT_EQ(state.sent_reports.size(), 2);
+    EXPECT_EQ(state.sent_reports[0], static_cast<uint8_t>(HidKey::PlayPause));
+    EXPECT_EQ(state.sent_reports[1], 0x00);
+    EXPECT_EQ(state.beep_count, 1);
 }

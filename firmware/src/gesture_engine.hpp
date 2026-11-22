@@ -33,7 +33,8 @@ template <typename Hal>
 class GestureEngine {
 public:
     static constexpr int kPollMs = 20;
-    static constexpr int kDebounceMs = 60;
+    static constexpr int kDebounceMs = 35;
+    static constexpr int kBounceConfirmMs = 5;
     static constexpr int kLongPressMs = 500;
     static constexpr int kBurstHoldMs = 2000;
     static constexpr int kResetHoldMs = 5000;
@@ -46,78 +47,72 @@ public:
 
     // Called when the main button semaphore is triggered
     static void on_main_button_wake() {
-        bool now = Hal::is_button_held();
+        // Wait for initial mechanical make-bounce to settle before sampling pin level
+        uint64_t t0 = Hal::get_time_ms();
+        Hal::sleep_ms(kDebounceMs);
+        if (!is_main_held_stable()) return;
 
-        if (now) {
-            // Rising edge — debounce
-            Hal::sleep_ms(kDebounceMs);
-            if (!Hal::is_button_held()) return;
+        bool burst = false;
+        bool reset_req = false;
 
-            // Start timing
-            uint64_t t0 = Hal::get_time_ms();
-            bool burst = false;
-            bool reset_req = false;
+        // Monitor hold duration
+        while (is_main_held_stable()) {
+            Hal::sleep_ms(kPollMs);
+            uint64_t duration = Hal::get_time_ms() - t0;
 
-            // Monitor hold duration
-            while (Hal::is_button_held()) {
+            if (duration >= kResetHoldMs) { // 5 seconds reset
+                reset_req = true;
+                break;
+            }
+            if (!burst && duration >= kLongPressMs) {
+                burst = true;
+                // Immediate visual + audio cue at 500ms so user knows long-press registered
+                Hal::led_set_trigger_active(true);
+                Hal::buzzer_long_beep();
+                // Continue polling to check for 5s reset
+            }
+        }
+
+        if (reset_req) {
+            Hal::led_set_trigger_active(false);
+            Hal::clear_bonds();
+            while (is_main_held_stable()) {
                 Hal::sleep_ms(kPollMs);
-                uint64_t duration = Hal::get_time_ms() - t0;
-                
-                if (duration >= kResetHoldMs) { // 5 seconds reset
-                    reset_req = true;
-                    break;
-                }
-                if (!burst && duration >= kLongPressMs) {
-                    burst = true;
-                    // Immediate visual + audio cue at 500ms so user knows long-press registered
-                    Hal::led_set_trigger_active(true);
-                    Hal::buzzer_long_beep();
-                    // Continue polling to check for 5s reset
-                }
             }
+            Hal::sleep_ms(kDebounceMs);
+            return;
+        }
 
-            if (reset_req) {
-                Hal::led_set_trigger_active(false);
-                Hal::clear_bonds();
-                while (Hal::is_button_held()) {
-                    Hal::sleep_ms(kPollMs);
-                }
-                Hal::sleep_ms(kDebounceMs);
-                return;
-            }
+        const ConfigMappings mappings = Hal::get_config_mappings();
 
-            const ConfigMappings mappings = Hal::get_config_mappings();
-
-            if (burst) {
-                const HidKey key = mappings.main_button_long;
-                if (key != HidKey::None) {
-                    Hal::send_hid_report(static_cast<uint8_t>(key));
-                    Hal::sleep_ms(kBurstHoldMs);
-                    Hal::send_hid_report(0x00);
-                }
-
-                Hal::led_set_trigger_active(false);
-                while (Hal::is_button_held()) {
-                    Hal::sleep_ms(kPollMs);
-                }
-                Hal::sleep_ms(kDebounceMs);
-                return;
-            }
-
-            // If we got here, it was a single click
-            Hal::led_set_trigger_active(true);
-            Hal::buzzer_beep();
-            
-            const HidKey key = mappings.main_button_single;
+        if (burst) {
+            const HidKey key = mappings.main_button_long;
             if (key != HidKey::None) {
                 Hal::send_hid_report(static_cast<uint8_t>(key));
-                Hal::sleep_ms(100);
+                Hal::sleep_ms(kBurstHoldMs);
                 Hal::send_hid_report(0x00);
             }
-            Hal::led_set_trigger_active(false);
 
+            Hal::led_set_trigger_active(false);
+            while (is_main_held_stable()) {
+                Hal::sleep_ms(kPollMs);
+            }
             Hal::sleep_ms(kDebounceMs);
+            return;
         }
+
+        // If we got here, it was a single click
+        Hal::led_set_trigger_active(true);
+        Hal::buzzer_beep();
+
+        const HidKey key = mappings.main_button_single;
+        send_key_tap(key, 100);
+        Hal::led_set_trigger_active(false);
+
+        while (is_main_held_stable()) {
+            Hal::sleep_ms(kPollMs);
+        }
+        Hal::sleep_ms(kDebounceMs);
     }
 
     // Called from encoder thread when rotation is detected
@@ -147,16 +142,16 @@ public:
         // Start timing from initial wake so debounce counts toward long-press threshold
         uint64_t t0 = Hal::get_time_ms();
         Hal::sleep_ms(kDebounceMs);
-        if (!Hal::is_encoder_button_held()) return;
+        if (!is_encoder_held_stable()) return;
 
         // Poll for long press
-        while (Hal::is_encoder_button_held()) {
+        while (is_encoder_held_stable()) {
             Hal::sleep_ms(kPollMs);
             if ((Hal::get_time_ms() - t0) >= kLongPressMs) {
                 // Long press → profile switch
                 Hal::on_profile_switch();
                 // Wait for release and debounce release edge
-                while (Hal::is_encoder_button_held()) {
+                while (is_encoder_held_stable()) {
                     Hal::sleep_ms(kPollMs);
                 }
                 Hal::sleep_ms(kDebounceMs);
@@ -171,19 +166,20 @@ public:
             printk("Encoder Btn: Triggering mapped key\n");
             send_key_tap(key, 50);
         }
+        while (is_encoder_held_stable()) {
+            Hal::sleep_ms(kPollMs);
+        }
         Hal::sleep_ms(kDebounceMs);
     }
 
     // Called when the secondary button (Trigger 2 / D4) semaphore is triggered
     static void on_secondary_button_wake() {
-        if (!Hal::is_secondary_button_held()) return;
-
-        // Start timing from initial wake so debounce counts toward long-press threshold
+        // Wait for initial mechanical make-bounce to settle before sampling pin level
         uint64_t t0 = Hal::get_time_ms();
         Hal::sleep_ms(kDebounceMs);
-        if (!Hal::is_secondary_button_held()) return;
+        if (!is_secondary_held_stable()) return;
 
-        while (Hal::is_secondary_button_held()) {
+        while (is_secondary_held_stable()) {
             Hal::sleep_ms(kPollMs);
             if ((Hal::get_time_ms() - t0) >= kLongPressMs) {
                 Hal::led_set_trigger_active(true);
@@ -193,7 +189,7 @@ public:
                 send_key_tap(mappings.secondary_button_long, 100);
                 Hal::led_set_trigger_active(false);
 
-                while (Hal::is_secondary_button_held()) {
+                while (is_secondary_held_stable()) {
                     Hal::sleep_ms(kPollMs);
                 }
                 Hal::sleep_ms(kDebounceMs);
@@ -209,10 +205,31 @@ public:
         send_key_tap(mappings.secondary_button_single, 100);
         Hal::led_set_trigger_active(false);
 
+        while (is_secondary_held_stable()) {
+            Hal::sleep_ms(kPollMs);
+        }
         Hal::sleep_ms(kDebounceMs);
     }
 
 private:
+    static bool is_main_held_stable() {
+        if (Hal::is_button_held()) return true;
+        Hal::sleep_ms(kBounceConfirmMs);
+        return Hal::is_button_held();
+    }
+
+    static bool is_secondary_held_stable() {
+        if (Hal::is_secondary_button_held()) return true;
+        Hal::sleep_ms(kBounceConfirmMs);
+        return Hal::is_secondary_button_held();
+    }
+
+    static bool is_encoder_held_stable() {
+        if (Hal::is_encoder_button_held()) return true;
+        Hal::sleep_ms(kBounceConfirmMs);
+        return Hal::is_encoder_button_held();
+    }
+
     static void send_key_tap(HidKey key, int duration_ms) {
         if (key != HidKey::None) {
             Hal::send_hid_report(static_cast<uint8_t>(key));

@@ -41,6 +41,9 @@
 - [x] **Independent Second Button (`Trigger 2` / `D4` / `P0.17`) (`hog.hpp`, `hog.cpp`, `gesture_engine.hpp`, `main.cpp`, `config.html`)**: Separated `btn_p4` from `btn_p5` onto its own `sec_btn_sem` / `sec_btn` thread with per-slot configurable short click (`< 500 ms`, default `Play/Pause`) and long press (`>= 500 ms`, default `Next Track`), extending `ConfigMappings` to 7 bytes (`AllSlotMappings` = 21 bytes across Slots `0–2`) while preserving 15/7/5-byte legacy NVS/BLE backward compatibility.
 - [x] **Composite 3-Report HID & Expanded Configurator (`hog.hpp`, `hog.cpp`, `config.html`, `test_gesture_engine.cpp`)**: Upgraded `hog_svc` from 1 Consumer report to 3 Input Reports (Report ID 1: Consumer Control + AC Back/Forward; Report ID 2: Mouse Clicks + Vertical Wheel + Horizontal AC Pan; Report ID 3: Standard Keyboard + Shortcuts), added 54 `HidKey` actions + `is_valid_hid_key()` validation, and upgraded `config.html` with `<optgroup>` categories and 4 one-click slot presets.
 - [x] **Per-Slot Dynamic BLE Device Names (`prj.conf`, `main.cpp`, `config.html`)**: Enabled `CONFIG_BT_DEVICE_NAME_DYNAMIC=y` (`CONFIG_BT_DEVICE_NAME_MAX=24`) and set dynamic GAP (`bt_set_name()`) + advertising names `"Cam Remote Pro 1"`, `"Cam Remote Pro 2"`, `"Cam Remote Pro 3"`, and `"Cam Config"` per active slot; updated slot tab labels in `config.html`.
+- [x] **Single-Device Slot Advertising & Cross-ID Pairing (`prj.conf`, `main.cpp`, `hog.cpp`)**: Added `BT_LE_ADV_OPT_ONE_TIME` + `bt_le_adv_stop()` on connect and duplicate-slot connection rejection (so `Cam Remote Pro 1` stops advertising once connected to PC), enabled `CONFIG_BT_ID_UNPAIR_MATCHING_BONDS=y` to resolve cross-slot SMP conflicts (`bt_id_find_conflict()`), added NVS `schema_ver=2` one-time HID bond/ID reset + `bond_deleted` NVS sync + 600ms `BT_SECURITY_L2` retry + stale bond recovery.
+- [x] **Mechanical Button Bounce Resilience (`gesture_engine.hpp`, `test_gesture_engine.cpp`)**: Removed premature `t=0` pin read during contact make-bounce, reduced `kDebounceMs` from `60` ms to `35` ms with `5` ms `is_*_held_stable()` confirmation and release wait, and added `InitialContactBounceAtWakeIsNotDropped`.
+- [x] **Always-Active QDEC Trigger & HID Diagnostics (`hog.cpp`)**: Registered `qdec0` trigger in `HidService::init()` and preserved it across slot switches (with `Engine::reset()` on slot/conn transitions) plus `Woke up (Encoder)! (%d deg)` and `HID: notify key` / `not connected (drop ...)` logs.
 - [x] **Agent Lifecycle Rule Discovery Fix (`.agent/rules/project-lifecycle.md`, `C:\Users\arunj\.gemini\GEMINI.md`, `../../.agents/rules/agent_project_lifecycle.md`)**: Fixed nested `.git` rule boundary and missing `trigger: always_on` / empty global `GEMINI.md` so post-verification commits and economic session hand-overs trigger reliably.
 
 ---
@@ -58,18 +61,15 @@
 ---
 
 ## 4. Verification & Handover Status
-- **Verified Build Commit:** `32cc98e` (`feat(firmware,config): add second button actions, composite 3-report HID, and per-slot BLE names`)
-- **Host Unit Tests (`python scripts/build.py --test`):** **55 / 55 passed** (`100% tests passed, 0 tests failed out of 55`, `1.23 sec`) across `test_gesture_engine` (25), `test_battery_conversion` (11), and `test_profile_manager` (19).
+- **Host Unit Tests (`python scripts/build.py --test`):** **56 / 56 passed** (`100% tests passed, 0 tests failed out of 56`, `1.80 sec`) across `test_gesture_engine` (26, including `InitialContactBounceAtWakeIsNotDropped`), `test_battery_conversion` (11), and `test_profile_manager` (19).
 - **Latest NCS v2.8.0 Firmware Build (`python scripts/build.py`):**
-  - **Result:** Exit code `0`, **0 warnings** in `src/*.cpp`, `CONFIG_NORDIC_QSPI_NOR` disabled, `CONFIG_USB_CDC_ACM_RINGBUF_SIZE=4096`, `CONFIG_BT_MAX_CONN=4`, `CONFIG_BT_DEVICE_NAME_DYNAMIC=y`.
-  - **Linker Footprint:** `FLASH: 222,644 B / 796 KB (27.31%)`, `RAM: 63,916 B / 256 KB (24.38%)`.
-  - **`arm-zephyr-eabi-size`:** `ROM / Flash Used: 222,642 Bytes / 1,048,576 Bytes (21.23%)`, `RAM Used: 64,316 Bytes / 262,144 Bytes (24.53%)`.
-  - **UF2 Output (Built & Flashed):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`445,440 bytes`, start address `0x26000`), flashed via `python scripts/build.py --flash` to `D:\FLASH.UF2` (`UF2 Bootloader 0.11.0`, clean unmount & reboot verified).
-- **Verified On-Hardware Telemetry (`COM9`, `115200` baud, `445,440`-byte build `32cc98e`):**
-  - Clean boot (`nRF Connect SDK v2.8.0-a2386bfc8401` / `Zephyr OS v3.7.99-0bc3393fb112`), NVS load (`fs_nvs: data wra: 1, 570`, `Settings loaded`, `Profile manager ready (slot 1)`), BT Identities `0–3` (`Identity[2]: CE:1F:FE:E5:66:02 (random)`).
-  - Threads & peripherals initialized: `Button`, `Secondary button`, `Encoder button`, `Encoder rotation`, `Battery monitor` (`BAT: raw=383, avg=383, mV=5142, %=100`), `HID Ready: Press=Photo, Hold=Burst (interrupt-driven)`.
-  - Dynamic per-slot advertising & BLE reconnection: `ADV: start slot 1 (Cam Remote Pro 2, BT ID 2) using addr CE:1F:FE:E5:66:02 (random)`, `Advertising watchdog started (every 5s)`, `Connected (slot 1, BT ID 2): 48:74:12:46:69:DE (public)`, `HID: slot 1 conn set`, `QDEC: trigger registered`, `Security changed: 48:74:12:46:69:DE (public) level 2`.
-- **Exact Next Step (Interactive Verification & Push):**
-  1. Re-pair (or clear bond via 5s `D5` hold) on existing BLE hosts so Windows/macOS/Android refreshes the cached 147-byte composite 3-report HID Report Map and per-slot names (`Cam Remote Pro 1/2/3`).
-  2. Verify physical inputs (`D5` primary button, `D4` secondary button, rotary encoder) and Slot 3 Web Bluetooth configuration (vertical/horizontal scroll, mouse clicks, navigation keys, keyboard shortcuts, and slot presets) via [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
+  - **Result:** Exit code `0`, **0 warnings/errors**, `CONFIG_BT_ID_UNPAIR_MATCHING_BONDS=y` verified in `.config`, `CONFIG_NORDIC_QSPI_NOR` disabled, `CONFIG_USB_CDC_ACM_RINGBUF_SIZE=4096`, `CONFIG_BT_MAX_CONN=4`, `CONFIG_BT_DEVICE_NAME_DYNAMIC=y`.
+  - **Linker Footprint:** `FLASH: 223,776 B / 796 KB (27.45%)`, `RAM: 63,964 B / 256 KB (24.40%)`.
+  - **`arm-zephyr-eabi-size`:** `ROM / Flash Used: 223,770 Bytes / 1,048,576 Bytes (21.34%)`, `RAM Used: 64,365 Bytes / 262,144 Bytes (24.55%)`.
+  - **UF2 Output (Built, Ready to Flash):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`448,000 bytes`, start address `0x26000`).
+- **Previous On-Hardware Telemetry (`COM9`, `115200` baud, prior `32cc98e` build):**
+  - Captured root-cause diagnostics on `COM9`: `SMP does not allow a pairing failure at this point. Known issue. Disconnecting instead.` (`Disconnected (slot 0): 48:74:12:46:69:DE (public) (reason 0x16)` -> `QDEC: trigger cleared`), plus 12/17 button wakes exiting immediately before `LED: 1` / `BEEP` due to `t=0` contact-bounce reads.
+- **Exact Next Step (Flash & Interactive Verification):**
+  1. Double-tap `RST` on the board to mount `D:\` (`UF2 Bootloader 0.11.0`) and run `python scripts/build.py --flash` to flash the `448,000`-byte `zephyr.uf2`.
+  2. Remove old `Cam Remote Pro 1/2/3` pairings on PC and mobile (schema v2 rotates HID BT IDs `1..3` once on first boot), then re-pair `Cam Remote Pro 1` to PC (verify it disappears from mobile scan once connected) and verify buttons (`D5`, `D4`, `D7`), rotary encoder (`QDEC`), and Slot 3 [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html) mappings.
   3. Push to `origin/master` when ready so GitHub Pages serves the updated [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
