@@ -203,7 +203,13 @@ The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) t
 
 ---
 
-## 6. Hardware & 3D Modeling (Coming Soon)
+## 6. Hardware & 3D Modeling
+
+- **Prototype Reference Photos:** [prototype_components_top.jpg](docs/images/prototype_components_top.jpg) and [prototype_wiring_bottom.jpg](docs/images/prototype_wiring_bottom.jpg)
+- **3D Printable Enclosure (Option A Pocket Clicker):** Parametric OpenSCAD design (`70.0 × 48.0 × 23.0 mm`, support-free Anycubic Kobra 3 v2 print plate, `0` CSG collisions across 9 assembly checks) in [hardware/case/README.md](hardware/case/README.md):
+  - OpenSCAD Source: [nrf_remote_case.scad](hardware/case/nrf_remote_case.scad)
+  - Build, STL Export & CSG Verification Script: [build_case.py](hardware/case/build_case.py)
+  - Ready-to-Slice STLs: [hardware/case/stl/](hardware/case/stl/) (including `nrf_remote_print_plate_all.stl` and `nrf_remote_calibration_coupon.stl`)
 
 ---
 
