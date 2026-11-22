@@ -61,15 +61,17 @@
 ---
 
 ## 4. Verification & Handover Status
+- **Verified Build Commit:** `4866610` (`fix(ble,input): fix dual-connect advertising, SMP cross-ID pairing, button bounce, and QDEC trigger`)
 - **Host Unit Tests (`python scripts/build.py --test`):** **56 / 56 passed** (`100% tests passed, 0 tests failed out of 56`, `1.80 sec`) across `test_gesture_engine` (26, including `InitialContactBounceAtWakeIsNotDropped`), `test_battery_conversion` (11), and `test_profile_manager` (19).
 - **Latest NCS v2.8.0 Firmware Build (`python scripts/build.py`):**
   - **Result:** Exit code `0`, **0 warnings/errors**, `CONFIG_BT_ID_UNPAIR_MATCHING_BONDS=y` verified in `.config`, `CONFIG_NORDIC_QSPI_NOR` disabled, `CONFIG_USB_CDC_ACM_RINGBUF_SIZE=4096`, `CONFIG_BT_MAX_CONN=4`, `CONFIG_BT_DEVICE_NAME_DYNAMIC=y`.
   - **Linker Footprint:** `FLASH: 223,776 B / 796 KB (27.45%)`, `RAM: 63,964 B / 256 KB (24.40%)`.
   - **`arm-zephyr-eabi-size`:** `ROM / Flash Used: 223,770 Bytes / 1,048,576 Bytes (21.34%)`, `RAM Used: 64,365 Bytes / 262,144 Bytes (24.55%)`.
-  - **UF2 Output (Built, Ready to Flash):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`448,000 bytes`, start address `0x26000`).
-- **Previous On-Hardware Telemetry (`COM9`, `115200` baud, prior `32cc98e` build):**
-  - Captured root-cause diagnostics on `COM9`: `SMP does not allow a pairing failure at this point. Known issue. Disconnecting instead.` (`Disconnected (slot 0): 48:74:12:46:69:DE (public) (reason 0x16)` -> `QDEC: trigger cleared`), plus 12/17 button wakes exiting immediately before `LED: 1` / `BEEP` due to `t=0` contact-bounce reads.
-- **Exact Next Step (Flash & Interactive Verification):**
-  1. Double-tap `RST` on the board to mount `D:\` (`UF2 Bootloader 0.11.0`) and run `python scripts/build.py --flash` to flash the `448,000`-byte `zephyr.uf2`.
-  2. Remove old `Cam Remote Pro 1/2/3` pairings on PC and mobile (schema v2 rotates HID BT IDs `1..3` once on first boot), then re-pair `Cam Remote Pro 1` to PC (verify it disappears from mobile scan once connected) and verify buttons (`D5`, `D4`, `D7`), rotary encoder (`QDEC`), and Slot 3 [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html) mappings.
-  3. Push to `origin/master` when ready so GitHub Pages serves the updated [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
+  - **UF2 Output (Built & Flashed):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`448,000 bytes`, start address `0x26000`), flashed via `python scripts/build.py --flash` to `D:\FLASH.UF2` (`UF2 Bootloader 0.11.0`, clean unmount & reboot verified).
+- **Verified On-Hardware Telemetry (`COM9`, `115200` baud, `448,000`-byte build `4866610`):**
+  - Clean boot (`nRF Connect SDK v2.8.0-a2386bfc8401` / `Zephyr OS v3.7.99-0bc3393fb112`), 9 early boot messages dropped before CDC ACM attach (zero QDEC/init errors).
+  - One-time schema v2 migration executed cleanly: `Settings loaded`, `MIGRATION: schema 0 -> 2, resetting HID slots 0..2 bonds & IDs`, `REL: Bond deleted on slot 0 (BT ID 1)`, `REL: Bond deleted on slot 1 (BT ID 2)`, `Profile manager ready (slot 0)`.
+  - Threads & advertising active on rotated BT ID 1 address: `Button`, `Secondary button`, `Encoder button`, `Encoder rotation`, `BAT: raw=383, avg=383, mV=5142, %=100`, `HID Ready: Press=Photo, Hold=Burst (interrupt-driven)`, `ADV: start slot 0 (Cam Remote Pro 1, BT ID 1) using addr FD:2C:02:A2:1F:EC (random)`, `Advertising started`, `Advertising watchdog started (every 5s)`.
+- **Exact Next Step (Interactive Verification & Push):**
+  1. Forget/remove old `Cam Remote Pro 1/2/3` pairings on PC and mobile, then pair `Cam Remote Pro 1` (`FD:2C:02:A2:1F:EC`) to PC, confirm it disappears from mobile scan once connected, and verify physical buttons (`D5`, `D4`, `D7`), rotary encoder (`QDEC`), and Slot 3 [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html) mappings.
+  2. Push to `origin/master` when ready so GitHub Pages serves the updated [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
