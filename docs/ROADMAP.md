@@ -64,11 +64,12 @@
   - **Result:** Exit code `0`, **0 warnings** in `src/*.cpp`, `CONFIG_NORDIC_QSPI_NOR` disabled, `CONFIG_USB_CDC_ACM_RINGBUF_SIZE=4096`, `CONFIG_BT_MAX_CONN=4`, `CONFIG_BT_DEVICE_NAME_DYNAMIC=y`.
   - **Linker Footprint:** `FLASH: 222,644 B / 796 KB (27.31%)`, `RAM: 63,916 B / 256 KB (24.38%)`.
   - **`arm-zephyr-eabi-size`:** `ROM / Flash Used: 222,642 Bytes / 1,048,576 Bytes (21.23%)`, `RAM Used: 64,316 Bytes / 262,144 Bytes (24.53%)`.
-  - **UF2 Output (Built, Ready to Flash):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`445,440 bytes`, start address `0x26000`).
-- **Previous On-Hardware Telemetry (`COM9`, prior `444,416`-byte build before dynamic per-slot BLE names):**
-  - Verified clean boot (`nRF Connect SDK v2.8.0` / `Zephyr OS v3.7.99`), NVS load (`Profile manager ready (slot 1)`), BT Identities `0–3` (`Identity[2]: CE:1F:FE:E5:66:02`), undirected advertising (`ADV: start slot 1 (BT ID 2)`), 5s advertising watchdog, `Secondary button thread started (interrupt-driven)` / `Zzz... Sleeping (SecBtn)`, main/encoder/QDEC threads, battery monitor (`BAT: raw=379, avg=379, mV=5089, %=100`), and automatic BLE reconnection on Slot 1 (`Connected (slot 1, BT ID 2): 48:74:12:46:69:DE (public)`, `HID: slot 1 conn set`, `QDEC: trigger registered`, `Security changed: ... level 2`).
-- **Exact Next Step (New Session Hand-Over, Flash & Interactive Verification):**
-  1. Start a new clean session referencing `docs/ROADMAP.md`.
-  2. Double-tap `RST` to mount `D:\` (`UF2 Bootloader 0.11.0`) and run `python scripts/build.py --flash` to flash the `445,440`-byte `zephyr.uf2`.
-  3. Re-pair (or clear bond via 5s `D5` hold) on existing BLE hosts so Windows/macOS/Android refreshes the cached 147-byte composite 3-report HID Report Map and per-slot names (`Cam Remote Pro 1/2/3`), then test vertical/horizontal scroll, mouse clicks, navigation keys, and keyboard shortcuts via [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
-  4. Push to `origin/master` when ready so GitHub Pages serves the updated [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
+  - **UF2 Output (Built & Flashed):** `firmware/build_adafruit_feather_nrf52840_nrf52840_uf2/zephyr/zephyr.uf2` (`445,440 bytes`, start address `0x26000`), flashed via `python scripts/build.py --flash` to `D:\FLASH.UF2` (`UF2 Bootloader 0.11.0`, clean unmount & reboot verified).
+- **Verified On-Hardware Telemetry (`COM9`, `115200` baud, `445,440`-byte build `32cc98e`):**
+  - Clean boot (`nRF Connect SDK v2.8.0-a2386bfc8401` / `Zephyr OS v3.7.99-0bc3393fb112`), NVS load (`fs_nvs: data wra: 1, 570`, `Settings loaded`, `Profile manager ready (slot 1)`), BT Identities `0–3` (`Identity[2]: CE:1F:FE:E5:66:02 (random)`).
+  - Threads & peripherals initialized: `Button`, `Secondary button`, `Encoder button`, `Encoder rotation`, `Battery monitor` (`BAT: raw=383, avg=383, mV=5142, %=100`), `HID Ready: Press=Photo, Hold=Burst (interrupt-driven)`.
+  - Dynamic per-slot advertising & BLE reconnection: `ADV: start slot 1 (Cam Remote Pro 2, BT ID 2) using addr CE:1F:FE:E5:66:02 (random)`, `Advertising watchdog started (every 5s)`, `Connected (slot 1, BT ID 2): 48:74:12:46:69:DE (public)`, `HID: slot 1 conn set`, `QDEC: trigger registered`, `Security changed: 48:74:12:46:69:DE (public) level 2`.
+- **Exact Next Step (Interactive Verification & Push):**
+  1. Re-pair (or clear bond via 5s `D5` hold) on existing BLE hosts so Windows/macOS/Android refreshes the cached 147-byte composite 3-report HID Report Map and per-slot names (`Cam Remote Pro 1/2/3`).
+  2. Verify physical inputs (`D5` primary button, `D4` secondary button, rotary encoder) and Slot 3 Web Bluetooth configuration (vertical/horizontal scroll, mouse clicks, navigation keys, keyboard shortcuts, and slot presets) via [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
+  3. Push to `origin/master` when ready so GitHub Pages serves the updated [config.html](file:///c:/Users/arunj/projects/nrf_control/config.html).
