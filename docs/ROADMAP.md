@@ -58,6 +58,7 @@
 ---
 
 ## 4. Verification & Handover Status
+- **Verified Build Commit:** `32cc98e` (`feat(firmware,config): add second button actions, composite 3-report HID, and per-slot BLE names`)
 - **Host Unit Tests (`python scripts/build.py --test`):** **55 / 55 passed** (`100% tests passed, 0 tests failed out of 55`, `1.23 sec`) across `test_gesture_engine` (25), `test_battery_conversion` (11), and `test_profile_manager` (19).
 - **Latest NCS v2.8.0 Firmware Build (`python scripts/build.py`):**
   - **Result:** Exit code `0`, **0 warnings** in `src/*.cpp`, `CONFIG_NORDIC_QSPI_NOR` disabled, `CONFIG_USB_CDC_ACM_RINGBUF_SIZE=4096`, `CONFIG_BT_MAX_CONN=4`, `CONFIG_BT_DEVICE_NAME_DYNAMIC=y`.
